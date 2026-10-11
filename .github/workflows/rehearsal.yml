@@ -1,0 +1,123 @@
+name: Task Rehearsal
+
+# Rehearses a task bundle before submitting it to the platform.
+# Runs the SAME check twice against the target repo:
+#   - mode=solved : applies your solve.sh first  -> check must PASS
+#   - mode=base   : no solution applied          -> check must FAIL
+# Both jobs green = the task is wired correctly. Any red = fix before submitting.
+#
+# v1 scope: build / install / launch / shell-level assertions.
+# Appium UI assertions are NOT validated here (see checks/lib/platform-stubs.sh).
+#
+# Keep this sandbox repo PRIVATE — it holds your solutions.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "Git URL of the target repository"
+        required: true
+        type: string
+      ref:
+        description: "Branch / tag / commit (empty = default branch)"
+        required: false
+        type: string
+        default: ""
+      solve_script:
+        description: "Path in THIS repo to solve script, e.g. solutions/freeotp-example.sh (empty for base-only smoke test)"
+        required: false
+        type: string
+        default: ""
+      check_script:
+        description: "Path in THIS repo to rehearsal check, e.g. checks/smoke-build-launch.sh"
+        required: true
+        type: string
+
+jobs:
+  rehearsal:
+    name: Rehearsal (${{ matrix.mode }})
+    runs-on: macos-26
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [solved, base]
+    steps:
+      - name: Checkout sandbox (holds solve + check scripts)
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26.x
+        run: |
+          XCODE_26="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$XCODE_26" ]; then
+            echo "::error::No Xcode 26.x on this runner image."
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_26"
+
+      - name: Clone target repository
+        run: |
+          git clone "${{ inputs.repo_url }}" target
+          cd target
+          if [ -n "${{ inputs.ref }}" ]; then
+            git checkout "${{ inputs.ref }}"
+          fi
+          echo "Base commit: $(git log -1 --format='%H %ci')"
+
+      - name: Apply reference solution
+        if: matrix.mode == 'solved'
+        env:
+          WORKSPACE: ${{ github.workspace }}/target
+        run: |
+          if [ -z "${{ inputs.solve_script }}" ]; then
+            echo "::error::mode=solved but no solve_script input given."
+            exit 1
+          fi
+          bash "${{ inputs.solve_script }}"
+
+      - name: Create and boot a fresh simulator
+        run: |
+          DEVTYPE="$(xcrun simctl list devicetypes | grep -Eo 'com\.apple\.CoreSimulator\.SimDeviceType\.iPhone-[0-9]+' | tail -1)"
+          RUNTIME="$(xcrun simctl list runtimes | grep -Eo 'com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+' | sort -V | tail -1)"
+          echo "Device type: $DEVTYPE / Runtime: $RUNTIME"
+          UDID="$(xcrun simctl create "rehearsal-${{ matrix.mode }}" "$DEVTYPE" "$RUNTIME")"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+
+      - name: Run rehearsal check
+        id: check
+        env:
+          WORKSPACE: ${{ github.workspace }}/target
+          LOGS_ROOT: ${{ github.workspace }}/logs
+          ARTIFACTS: ${{ github.workspace }}/artifacts
+        run: |
+          mkdir -p "$LOGS_ROOT" "$ARTIFACTS"
+          VERDICT=fail
+          if bash "${{ inputs.check_script }}"; then
+            VERDICT=pass
+          fi
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          echo "### Rehearsal verdict — mode `${{ matrix.mode }}`: **$VERDICT**" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce expectation
+        run: |
+          V="${{ steps.check.outputs.verdict }}"
+          if [ "${{ matrix.mode }}" = "solved" ] && [ "$V" = "pass" ]; then
+            echo "Solved run passed, as expected."; exit 0
+          fi
+          if [ "${{ matrix.mode }}" = "base" ] && [ "$V" = "fail" ]; then
+            echo "Base run failed, as expected (the task is a real change)."; exit 0
+          fi
+          echo "::error::Unexpected outcome — mode=${{ matrix.mode }}, verdict=$V"
+          exit 1
+
+      - name: Upload logs and artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rehearsal-${{ matrix.mode }}
+          path: |
+            logs/
+            artifacts/
+          if-no-files-found: ignore

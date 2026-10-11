@@ -1,0 +1,106 @@
+name: Repo Qualifier
+
+# Run this BEFORE authoring any task on a repo.
+# It proves the repo builds for iOS on Xcode 26.x — the platform's toolchain.
+# Usage: Actions -> Repo Qualifier -> Run workflow -> paste repo URL (+ optional ref).
+# Cost: ~10-15 macOS minutes per run. macOS minutes bill 10x on private repos.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "Git URL of the repository to qualify (https://...)"
+        required: true
+        type: string
+      ref:
+        description: "Branch / tag / commit to build (empty = default branch)"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  qualify:
+    name: Qualify build (Xcode 26.x, iOS Simulator destination)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Select Xcode 26.x
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          XCODE_26="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$XCODE_26" ]; then
+            echo "::error::No Xcode 26.x installed on this runner image. Change runs-on to another image that has it."
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_26"
+          echo "Using: $(xcodebuild -version | head -1)"
+
+      - name: Clone target repository
+        run: |
+          git clone "${{ inputs.repo_url }}" target
+          cd target
+          if [ -n "${{ inputs.ref }}" ]; then
+            git checkout "${{ inputs.ref }}"
+          fi
+          echo "Base commit: $(git log -1 --format='%H %ci')"
+
+      - name: Survey project layout
+        id: survey
+        working-directory: target
+        run: |
+          S="$GITHUB_STEP_SUMMARY"
+          echo "### Project survey" >> "$S"
+          for f in Package.swift Podfile Podfile.lock Cartfile Cartfile.resolved project.yml .xcodegen.yml; do
+            [ -f "$f" ] && echo "- found \`$f\`" >> "$S"
+          done
+          found_proj="$(ls -d *.xcodeproj 2>/dev/null | head -1 || true)"
+          found_ws="$(ls -d *.xcworkspace 2>/dev/null | head -1 || true)"
+          [ -n "$found_proj" ] && echo "- found \`$found_proj\`" >> "$S"
+          [ -n "$found_ws" ] && echo "- found \`$found_ws\`" >> "$S"
+          if [ -f Podfile.lock ] && [ ! -d Pods ]; then
+            echo "- :warning: **Podfile.lock present but Pods/ NOT committed — the platform requires committed Pods for CocoaPods projects**" >> "$S"
+          fi
+          xcodebuild -list -json > /tmp/schemes.json 2>/tmp/list.err || true
+          SCHEME="$(python3 -c 'import json;d=json.load(open("/tmp/schemes.json"));s=d.get("project",{}).get("schemes",[]);print(s[0] if s else "")' 2>/dev/null || true)"
+          if [ -z "$SCHEME" ] && [ -n "$found_proj" ]; then
+            SCHEME="${found_proj%.xcodeproj}"
+          fi
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+          echo "proj=$found_proj" >> "$GITHUB_OUTPUT"
+          echo "ws=$found_ws" >> "$GITHUB_OUTPUT"
+          echo "- selected scheme: \`$SCHEME\`" >> "$S"
+          [ -n "$SCHEME" ] || { echo "::error::No scheme detected — inspect list.err artifact"; exit 1; }
+          echo "### Available iOS runtimes" >> "$S"
+          xcrun simctl list runtimes | grep iOS >> "$S" || true
+
+      - name: Build for iOS Simulator
+        working-directory: target
+        run: |
+          set -o pipefail
+          FLAGS=()
+          WS="${{ steps.survey.outputs.ws }}"
+          PROJ="${{ steps.survey.outputs.proj }}"
+          [ -n "$WS" ] && FLAGS+=(-workspace "$WS")
+          [ -n "$PROJ" ] && FLAGS+=(-project "$PROJ")
+          if xcodebuild build "${FLAGS[@]}" \
+              -scheme "${{ steps.survey.outputs.scheme }}" \
+              -destination 'generic/platform=iOS Simulator' \
+              -skipMacroValidation -skipPackagePluginValidation \
+              -derivedDataPath "$RUNNER_TEMP/dd" \
+              COMPILER_INDEX_STORE_ENABLE=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              > "$GITHUB_WORKSPACE/build.log" 2>&1; then
+            echo "### :white_check_mark: Build succeeded for iOS Simulator" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### :x: Build FAILED — last 80 lines:" >> "$GITHUB_STEP_SUMMARY"
+            tail -80 "$GITHUB_WORKSPACE/build.log" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
