@@ -1,6 +1,9 @@
 name: Runner Probe
 
 on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/probe.yml']
   workflow_dispatch:
 
 jobs:
@@ -8,10 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "ubuntu works"
-  mac14:
-    runs-on: macos-14
-    steps:
-      - run: echo "macos-14 works"
   mac15:
     runs-on: macos-15
     steps:
