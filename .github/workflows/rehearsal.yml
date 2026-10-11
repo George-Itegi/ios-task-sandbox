@@ -36,7 +36,7 @@ on:
 jobs:
   rehearsal:
     name: Rehearsal (${{ matrix.mode }})
-    runs-on: macos-26
+    runs-on: macos-15
     timeout-minutes: 40
     strategy:
       fail-fast: false

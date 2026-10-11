@@ -21,7 +21,7 @@ on:
 jobs:
   qualify:
     name: Qualify build (Xcode 26.x, iOS Simulator destination)
-    runs-on: macos-26
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - name: Select Xcode 26.x
