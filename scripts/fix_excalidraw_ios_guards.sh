@@ -546,9 +546,19 @@ edit("ExcalidrawZ/ExclidrawView/WebView/ExcalidrawView.swift",
                 "wrap keyDown(with: NSEvent) in os(macOS)"))
 edit("ExcalidrawZ/Settings/AboutView.swift",
      replace_once(
-         "                    Image(nsImage: NSApp.applicationIconImage)",
-         "#if os(macOS)\n                    Image(nsImage: NSApp.applicationIconImage)\n#else\n                    Image(\"AppIcon\")\n#endif",
-         "About icon: NSApp.applicationIconImage (macOS) / asset (iOS)"))
+         "                    Image(nsImage: NSApp.applicationIconImage)\n"
+         "                        .resizable()\n"
+         "                        .frame(width: 128, height: 128)\n",
+         "#if os(macOS)\n"
+         "                    Image(nsImage: NSApp.applicationIconImage)\n"
+         "                        .resizable()\n"
+         "                        .frame(width: 128, height: 128)\n"
+         "#else\n"
+         "                    Image(\"AppIcon\")\n"
+         "                        .resizable()\n"
+         "                        .frame(width: 128, height: 128)\n"
+         "#endif\n",
+         "About icon: NSApp.applicationIconImage (macOS) / asset (iOS) — modifiers INSIDE branches (an #if element in a ViewBuilder list types as View, .resizable cannot chain after #endif)"))
 
 # ---- wave 3 (build #28 errors): iOS-17-only SwiftUI APIs + macOS-only scene APIs ----
 # Facts from #28: branches of `if #available(macOS X, *)` are type-checked on iOS
@@ -840,6 +850,91 @@ edit("ExcalidrawZ/Sidebar/Library/LibraryImportSheetView.swift",
          "                                    .toggleStyle(.checkbox)\n"
          "#endif\n",
          "ToggleStyle.checkbox os(macOS)-only"))
+
+# ---- wave 7 (build #32 errors): webview inspectable, iOS representable twin ----
+#  a) ExcalidrawStore.swift: WKWebView.isInspectable is iOS 16.4+; the existing
+#     `if #available(macOS 13.3, *)` clause is vacuously true on iOS -> extend
+#     with iOS 16.4 (empty else branch already present upstream).
+#  b) ExcalidrawView.swift: upstream left `#elseif os(iOS)` EMPTY — ExcalidrawView
+#     is only NSViewRepresentable on macOS, so on iOS it is not a View and
+#     ExcalidrawContainerView's `.preferredColorScheme` fails. Fill the hook with
+#     a UIViewRepresentable twin (makeUIView/updateUIView/makeCoordinator);
+#     updateUIView mirrors updateNSView verbatim (all coordinator methods are
+#     cross-platform — verified they compile on iOS after the isInspectable fix).
+#  c) FileListView.swift: two-param onChange(of:) { _, newValue in } is iOS 17+;
+#     both closures ignore the old value -> convert to one-param (iOS 14+),
+#     exactly what upstream's own else-branch already does.
+edit("ExcalidrawZ/ExclidrawView/WebView/Coordinator/ExcalidrawStore.swift",
+     replace_once(
+         "            if #available(macOS 13.3, *) {\n"
+         "                self.webView.isInspectable = true\n",
+         "            if #available(macOS 13.3, iOS 16.4, *) {\n"
+         "                self.webView.isInspectable = true\n",
+         "isInspectable clause + iOS 16.4"))
+edit("ExcalidrawZ/ExclidrawView/WebView/ExcalidrawView.swift",
+     replace_once(
+         "#elseif os(iOS)\n\n#endif",
+         "#elseif os(iOS)\n"
+         "// Upstream left this branch empty (macOS-only project at a7631da).\n"
+         "// Provide the UIKit twin so ExcalidrawView is a View on iOS.\n"
+         "extension ExcalidrawView: UIViewRepresentable {\n"
+         "\n"
+         "    func makeUIView(context: Context) -> ExcalidrawWebView {\n"
+         "        context.coordinator.webView\n"
+         "    }\n"
+         "\n"
+         "    func updateUIView(_ uiView: ExcalidrawWebView, context: Context) {\n"
+         "        let webView = context.coordinator.webView\n"
+         "        context.coordinator.parent = self\n"
+         "        exportState.excalidrawWebCoordinator = context.coordinator\n"
+         "        fileState.excalidrawWebCoordinator = context.coordinator\n"
+         "        guard !webView.isLoading, !isLoading else { return }\n"
+         "        Task {\n"
+         "            do {\n"
+         "                if appPreference.excalidrawAppearance == .auto {\n"
+         "                    try await context.coordinator.changeColorMode(dark: colorScheme == .dark)\n"
+         "                } else {\n"
+         "                    try await context.coordinator.changeColorMode(dark: appPreference.excalidrawAppearance.colorScheme ?? colorScheme == .dark)\n"
+         "                }\n"
+         "            } catch {\n"
+         "                self.onError(error)\n"
+         "            }\n"
+         "        }\n"
+         "        context.coordinator.loadFile(from: fileState.currentFile)\n"
+         "        if context.coordinator.lastTool != toolState.activatedTool {\n"
+         "            Task {\n"
+         "                do {\n"
+         "                    if let rawValue = toolState.activatedTool?.rawValue {\n"
+         "                        if rawValue < 10 {\n"
+         "                            try await context.coordinator.toggleToolbarAction(key: rawValue)\n"
+         "                        } else if let keyEquivalent = toolState.activatedTool?.keyEquivalent {\n"
+         "                            try await context.coordinator.toggleToolbarAction(key: keyEquivalent)\n"
+         "                        }\n"
+         "                    }\n"
+         "                } catch {\n"
+         "                    self.onError(error)\n"
+         "                }\n"
+         "            }\n"
+         "        }\n"
+         "    }\n"
+         "\n"
+         "    func makeCoordinator() -> Coordinator {\n"
+         "        Coordinator(self)\n"
+         "    }\n"
+         "}\n"
+         "#endif",
+         "fill empty os(iOS) hook: UIViewRepresentable twin"))
+# NOTE: do NOT use replace_once here — its "already applied" check (`new in src`)
+# false-positives because upstream's own else-branch already contains the
+# one-param form. Count-based transform instead.
+def drop_two_param_closures(src):
+    """FileListView: two-param onChange closures are iOS 17+; both ignore the
+    old value -> one-param (iOS 14+), mirroring upstream's own else-branch."""
+    n = src.count("{ _, newValue in")
+    if n == 0:
+        return None, "already applied (onChange two-param -> one-param)"
+    return src.replace("{ _, newValue in", "{ newValue in"), f"converted {n} onChange closure(s)"
+edit("ExcalidrawZ/Sidebar/FileListView.swift", drop_two_param_closures)
 PYEOF
 
 echo "== diff summary =="
