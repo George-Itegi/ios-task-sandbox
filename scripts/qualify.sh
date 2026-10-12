@@ -31,12 +31,28 @@ ls -d *.xcodeproj *.xcworkspace Package.swift Podfile Podfile.lock project.yml 2
 if [ -f Podfile.lock ] && [ ! -d Pods ]; then
   echo "WARNING: Podfile.lock present but Pods/ not committed (platform requires committed Pods)"
 fi
+if [ -f Cartfile.resolved ] && [ ! -d Carthage/Build ]; then
+  echo "WARNING: Cartfile.resolved present but Carthage/Build/ not committed (platform resolves ONLY Swift packages)"
+fi
 
-xcodebuild -list -json > /tmp/schemes.json 2>/dev/null || true
-SCHEME="$(python3 -c 'import json;d=json.load(open("/tmp/schemes.json"));s=d.get("project",{}).get("schemes",[]);print(s[0] if s else "")' 2>/dev/null || true)"
-if [ -z "$SCHEME" ]; then
-  found="$(ls -d *.xcodeproj 2>/dev/null | head -1 || true)"
-  [ -n "$found" ] && SCHEME="${found%.xcodeproj}"
+# Support nested projects (e.g. repo/iOS/App/App.xcodeproj): cd to the first
+# project dir found within 3 levels. Handles spaces in paths.
+if [ -z "$(ls -d *.xcodeproj *.xcworkspace 2>/dev/null || true)" ]; then
+  nested="$(find . -maxdepth 3 \( -name '*.xcodeproj' -o -name '*.xcworkspace' \) -not -path '*/Pods/*' -not -path '*/Carthage/*' 2>/dev/null | head -1 || true)"
+  if [ -n "$nested" ]; then
+    echo "Nested project found: $nested"
+    cd "$(dirname "$nested")"
+  fi
+fi
+
+# SCHEME env overrides auto-detection (set per workflow on CI).
+if [ -z "${SCHEME:-}" ]; then
+  xcodebuild -list -json > /tmp/schemes.json 2>/dev/null || true
+  SCHEME="$(python3 -c 'import json;d=json.load(open("/tmp/schemes.json"));s=d.get("project",{}).get("schemes",[]);print(s[0] if s else "")' 2>/dev/null || true)"
+  if [ -z "$SCHEME" ]; then
+    found="$(ls -d *.xcodeproj 2>/dev/null | head -1 || true)"
+    [ -n "$found" ] && SCHEME="${found%.xcodeproj}"
+  fi
 fi
 echo "Using scheme: $SCHEME"
 [ -n "$SCHEME" ] || { echo "ERROR: no scheme detected"; exit 1; }
