@@ -41,6 +41,14 @@
 #  16. ExcalidrawView.swift       : keyDown(with: NSEvent) override wrapped in os(macOS).
 #  17. AboutView.swift            : app icon via Image("AppIcon") on iOS.
 #
+# --- Wave 5 (build #30: last whole-module error) ---
+#  18. Utils.swift                : iOS stand-in for ChocofordUI's macOS-only
+#      `SharingsPicker` (pinned ChocofordKit 39a8bf5 defines it entirely inside
+#      `#if os(macOS)`; call site ExportImageView.swift:188 passes
+#      `isPresented:sharingItems:`). Stub is a UIViewControllerRepresentable
+#      with the same call surface, presenting UIActivityViewController -> call
+#      site compiles unchanged on iOS and works at runtime.
+#
 # Usage: bash fix_excalidraw_ios_guards.sh <target-repo-dir>
 set -euo pipefail
 REPO_DIR="${1:?usage: fix_excalidraw_ios_guards.sh <repo-dir>}"
@@ -223,6 +231,49 @@ extension Image {
 }
 """
 
+SHARINGS_PICKER_IOS = """
+// ==== iOS SharingsPicker stand-in (added by fix_excalidraw_ios_guards.sh) ====
+// ChocofordKit 39a8bf5 defines SharingsPicker only for macOS
+// (NSViewRepresentable around NSSharingServicePicker). Mirror the same
+// call surface for iOS so ExportImageView.swift compiles unchanged;
+// presents UIActivityViewController when isPresented flips to true.
+#if !os(macOS)
+import SwiftUI
+import UIKit
+
+struct SharingsPicker: UIViewControllerRepresentable {
+    @Binding var isPresented: Bool
+    var sharingItems: [Any] = []
+
+    final class Coordinator { var presented = false }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        let vc = UIViewController()
+        vc.view.backgroundColor = .clear
+        return vc
+    }
+
+    func updateUIViewController(_ vc: UIViewController, context: Context) {
+        guard isPresented, !context.coordinator.presented else { return }
+        context.coordinator.presented = true
+        let activityVC = UIActivityViewController(activityItems: sharingItems,
+                                                  applicationActivities: nil)
+        activityVC.completionWithItemsHandler = { _, _, _, _ in
+            context.coordinator.presented = false
+            isPresented = false
+        }
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            activityVC.popoverPresentationController?.sourceView = vc.view
+            activityVC.popoverPresentationController?.sourceRect =
+                CGRect(x: vc.view.bounds.midX, y: vc.view.bounds.midY, width: 1, height: 1)
+        }
+        vc.present(activityVC, animated: true)
+    }
+}
+#endif
+"""
+
 def append_infra(src):
     """Utils.swift: import SwiftUI + PlatformImage typealias + Image(platformImage:) + iOS resize helper."""
     notes, cur, changed = [], src, False
@@ -246,6 +297,15 @@ def append_infra(src):
     else:
         cur = cur.rstrip("\n") + "\n" + INFRA
         notes.append("[ok: appended cross-platform shims (PlatformImage / Image init / iOS resize)]")
+        changed = True
+    # 3) wave 5 (build #30): iOS stand-in for the macOS-only ChocofordUI
+    #    `SharingsPicker` (call site: ExportImageView.swift `.background(...)`).
+    #    Separate sub-step so trees already carrying the old INFRA still get it.
+    if "struct SharingsPicker: UIViewControllerRepresentable" in cur:
+        notes.append("[keep: iOS SharingsPicker stub present]")
+    else:
+        cur = cur.rstrip("\n") + "\n" + SHARINGS_PICKER_IOS
+        notes.append("[ok: appended iOS SharingsPicker stub (UIActivityViewController)]")
         changed = True
     if not changed:
         return None, " ".join(notes)
