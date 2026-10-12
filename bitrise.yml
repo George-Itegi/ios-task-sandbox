@@ -23,7 +23,7 @@ workflows:
   primary:
     steps:
       - script@1:
-          title: Smoke: freeotp-ios build + install + launch
+          title: "Smoke: freeotp-ios build + install + launch"
           inputs:
             - content: |-
                 #!/usr/bin/env bash
@@ -34,7 +34,7 @@ workflows:
   qualify_freeotp:
     steps:
       - script@1:
-          title: Qualify: freeotp-ios (build only)
+          title: "Qualify: freeotp-ios (build only)"
           inputs:
             - content: |-
                 #!/usr/bin/env bash
@@ -44,7 +44,7 @@ workflows:
   qualify_productivity:
     steps:
       - script@1:
-          title: Qualify: Productivity-Pro (build only)
+          title: "Qualify: Productivity-Pro (build only)"
           inputs:
             - content: |-
                 #!/usr/bin/env bash
@@ -54,7 +54,7 @@ workflows:
   qualify_expense:
     steps:
       - script@1:
-          title: Qualify: Expense-Tracker-App (build only)
+          title: "Qualify: Expense-Tracker-App (build only)"
           inputs:
             - content: |-
                 #!/usr/bin/env bash
