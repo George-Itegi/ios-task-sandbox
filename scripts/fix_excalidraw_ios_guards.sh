@@ -692,6 +692,36 @@ edit("ExcalidrawZ/Settings/AboutChocofordView.swift",
          "                    Capsule()\n"
          "                        .foregroundStyle(.background)",
          "badge bg: fill->foregroundStyle"))
+
+# ---- wave 4 (build #29 errors): last 2 macOS-only modifier sites ----
+# Build #29 (validator PASS, 12 -> 4 errors) proved the wave-3 wrap pattern
+# compiles on iOS (SE-0308 postfix #if in member chains). Remaining sites:
+#   a) ShareView.swift:81  .toolbar(.hidden, for: .windowToolbar)
+#      (ToolbarPlacement.windowToolbar is macOS 13+ only; 'unavailable in iOS')
+#   b) SettingsView.swift:45 (else branch of `#available(macOS 13.0, *)`)
+#      .visualEffect(material: .sidebar) — ChocofordUI NSVisualEffect extension
+#      does not exist on iOS -> same wrap wave 3 applied to ShareView:84.
+#      (Note: else branches ARE type-checked on iOS — this site proves it.)
+edit("ExcalidrawZ/Share/ShareView.swift",
+     replace_once(
+         "            .padding(.horizontal, 40)\n"
+         "            .toolbar(.hidden, for: .windowToolbar)\n",
+         "            .padding(.horizontal, 40)\n"
+         "#if os(macOS)\n"
+         "            .toolbar(.hidden, for: .windowToolbar)\n"
+         "#endif\n",
+         "windowToolbar placement os(macOS)-only"))
+edit("ExcalidrawZ/Settings/SettingsView.swift",
+     replace_once(
+         "                sidebar\n"
+         "                    .visualEffect(material: .sidebar)\n"
+         "                    .frame(width: 200)\n",
+         "                sidebar\n"
+         "#if os(macOS)\n"
+         "                    .visualEffect(material: .sidebar)\n"
+         "#endif\n"
+         "                    .frame(width: 200)\n",
+         "else-branch visualEffect(material:) os(macOS)-only"))
 PYEOF
 
 echo "== diff summary =="
