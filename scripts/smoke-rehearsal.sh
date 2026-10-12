@@ -13,11 +13,14 @@ REF="${2:-}"
 ROOT="$PWD"
 
 echo "== Toolchain =="
-XCODE_26="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)"
+XCODE_26="$(ls -d /Applications/Xcode*26*.app 2>/dev/null | sort -V | tail -1 || true)"
 if [ -z "$XCODE_26" ]; then
   echo "ERROR: no Xcode 26.x found. Available:"; ls /Applications | grep -i xcode || true
   exit 1
 fi
+# DEVELOPER_DIR takes precedence over xcode-select (no sudo dependency);
+# sudo xcode-select kept as fallback for bare xcodebuild invocations.
+export DEVELOPER_DIR="$XCODE_26/Contents/Developer"
 sudo xcode-select -s "$XCODE_26" 2>/dev/null || true
 xcodebuild -version
 swift --version 2>/dev/null | head -1 || true
