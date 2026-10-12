@@ -1,0 +1,46 @@
+# Cirrus CI — macOS verification sandbox
+# Free OSS compute for this PUBLIC repository. No billing involved.
+#
+# - "Probe macOS image" runs automatically on every push: proves macOS +
+#   Xcode 26.3 + simulator runtimes are available on the Cirrus instance.
+# - The three qualifier tasks are MANUAL (Run button in the Cirrus UI):
+#   each proves one target repo builds for iOS on the platform's Xcode.
+#
+# Image pinned to Xcode 26.3 = exact match with the expert platform.
+
+probe_task:
+  name: Probe macOS image (Xcode 26.3)
+  macos_instance:
+    image: ghcr.io/cirruslabs/macos-tahoe-xcode:26.3
+  script:
+    - sw_vers
+    - xcodebuild -version
+    - ls /Applications | grep -i xcode
+    - xcrun simctl list runtimes | grep iOS
+
+qualify_freeotp_task:
+  name: "Qualifier: freeotp-ios"
+  trigger_type: manual
+  timeout_in: 45
+  macos_instance:
+    image: ghcr.io/cirruslabs/macos-tahoe-xcode:26.3
+  script:
+    - bash scripts/qualify.sh https://github.com/freeotp/freeotp-ios
+
+qualify_productivity_task:
+  name: "Qualifier: Productivity-Pro"
+  trigger_type: manual
+  timeout_in: 45
+  macos_instance:
+    image: ghcr.io/cirruslabs/macos-tahoe-xcode:26.3
+  script:
+    - bash scripts/qualify.sh https://github.com/stoobit/Productivity-Pro
+
+qualify_expense_task:
+  name: "Qualifier: Expense-Tracker-App"
+  trigger_type: manual
+  timeout_in: 45
+  macos_instance:
+    image: ghcr.io/cirruslabs/macos-tahoe-xcode:26.3
+  script:
+    - bash scripts/qualify.sh https://github.com/abdorizak/Expense-Tracker-App
