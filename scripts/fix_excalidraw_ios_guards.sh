@@ -967,5 +967,61 @@ HTMLEOF
   echo "PATCHED (placeholder): $STUB_DIR/index.html - CpResource folder reference now resolves"
 fi
 
+# --- Wave 9: accessibility identifiers for the launch-visible controls ------
+# The grading automation reads the UI through the accessibility tree; the
+# sidebar toolbar controls and the file-list row carry no identifiers at this
+# commit. Anchors verified unique at 8355c75 (sidebarLeading x1; the first
+# createNewFile Label in file order is the sidebarToolbar one — the second
+# sits in a macOS<13 dead branch that never renders on iOS).
+python3 - <<'PYEOF'
+import pathlib
+
+def patch(path, old, new, expect=1):
+    p = pathlib.Path(path)
+    src = p.read_text()
+    if new in src:
+        print(f"KEEP (already applied): {path}")
+        return
+    n = src.count(old)
+    assert n == expect, f"{path}: anchor count {n} != {expect}"
+    p.write_text(src.replace(old, new, 1))
+    print(f"PATCHED (a11y): {path}")
+
+# 1. create-drawing control (sidebar toolbar, placement .primaryAction)
+patch(
+    "ExcalidrawZ/ContentView.swift",
+    """                Label(.localizable(.createNewFile), systemSymbol: .squareAndPencil)
+            }
+            .help(.localizable(.createNewFile))
+            .disabled(fileState.currentGroup?.groupType == .trash)""",
+    """                Label(.localizable(.createNewFile), systemSymbol: .squareAndPencil)
+            }
+            .help(.localizable(.createNewFile))
+            .disabled(fileState.currentGroup?.groupType == .trash)
+            .accessibilityIdentifier("create_file_button")""",
+)
+
+# 2. sidebar visibility toggle (sidebar toolbar, placement .destructiveAction)
+patch(
+    "ExcalidrawZ/ContentView.swift",
+    """                    Image(systemSymbol: .sidebarLeading)
+                }""",
+    """                    Image(systemSymbol: .sidebarLeading)
+                }
+                .accessibilityIdentifier("sidebar_toggle_button")""",
+)
+
+# 3. drawing-list row (FileListView usage site — not the shared component,
+#    so rows rendered by other lists keep no identifier)
+patch(
+    "ExcalidrawZ/Sidebar/FileListView.swift",
+    """                    FileRowView(groups: groups, file: file)
+                        .transition(.opacity)""",
+    """                    FileRowView(groups: groups, file: file)
+                        .accessibilityIdentifier("file_row")
+                        .transition(.opacity)""",
+)
+PYEOF
+
 echo "== diff summary =="
 git --no-pager diff --stat || true
