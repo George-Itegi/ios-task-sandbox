@@ -478,6 +478,220 @@ edit("ExcalidrawZ/Settings/AboutView.swift",
          "                    Image(nsImage: NSApp.applicationIconImage)",
          "#if os(macOS)\n                    Image(nsImage: NSApp.applicationIconImage)\n#else\n                    Image(\"AppIcon\")\n#endif",
          "About icon: NSApp.applicationIconImage (macOS) / asset (iOS)"))
+
+# ---- wave 3 (build #28 errors): iOS-17-only SwiftUI APIs + macOS-only scene APIs ----
+# Facts from #28: branches of `if #available(macOS X, *)` are type-checked on iOS
+# (macOS clause is vacuously true there), but their `else` branches are skipped.
+# Shape.fill(_:style:) is iOS 17+ in this SDK; replacements use iOS 13/15-era APIs:
+# foregroundStyle (15+), stroke(Color) (13+), background(_:in:) (15+).
+edit("ExcalidrawZ/ExcalidrawZApp.swift",
+     compose(
+         replace_once(
+             "        Settings {\n"
+             "            SettingsView()\n"
+             "                .environmentObject(appPrefernece)\n"
+             "#if os(macOS) && !APP_STORE\n"
+             "                .environmentObject(updateChecker)\n"
+             "#endif\n"
+             "                .preferredColorScheme(appPrefernece.appearance.colorScheme)\n"
+             "        }",
+             "#if os(macOS)\n"
+             "        Settings {\n"
+             "            SettingsView()\n"
+             "                .environmentObject(appPrefernece)\n"
+             "#if os(macOS) && !APP_STORE\n"
+             "                .environmentObject(updateChecker)\n"
+             "#endif\n"
+             "                .preferredColorScheme(appPrefernece.appearance.colorScheme)\n"
+             "        }\n"
+             "#endif",
+             "wrap Settings scene in os(macOS)"),
+         replace_once(
+             "        if #available(macOS 13.0, *) {\n"
+             "            return self.defaultSize(size)",
+             "        if #available(macOS 13.0, iOS 17.0, *) {\n"
+             "            return self.defaultSize(size)",
+             "defaultSize clause + iOS 17.0"),
+     ))
+edit("ExcalidrawZ/Settings/SettingsView.swift",
+     compose(
+         replace_once(
+             "                sidebar\n"
+             "                    .toolbar(removing: .sidebarToggle)",
+             "                sidebar\n"
+             "#if os(macOS)\n"
+             "                    .toolbar(removing: .sidebarToggle)\n"
+             "#endif",
+             "toolbar(removing:) os(macOS)-only (iOS 17+)"),
+         replace_once(
+             "            .removeSettingsSidebarToggle()\n"
+             "            .navigationTitle(.localizable(.settingsNavigationTitle))",
+             "#if os(macOS)\n"
+             "            .removeSettingsSidebarToggle()\n"
+             "#endif\n"
+             "            .navigationTitle(.localizable(.settingsNavigationTitle))",
+             "removeSettingsSidebarToggle os(macOS)-only"),
+     ))
+edit("ExcalidrawZ/ContentView.swift",
+     compose(
+         replace_once(
+             "                    .toolbar(content: sidebarToolbar)\n"
+             "                    .toolbar(removing: .sidebarToggle)",
+             "                    .toolbar(content: sidebarToolbar)\n"
+             "#if os(macOS)\n"
+             "                    .toolbar(removing: .sidebarToggle)\n"
+             "#endif",
+             "toolbar(removing:) os(macOS)-only (iOS 17+)"),
+         replace_once(
+             "        .removeSettingsSidebarToggle()\n"
+             "        .onChange(of: columnVisibility) { newValue in",
+             "#if os(macOS)\n"
+             "        .removeSettingsSidebarToggle()\n"
+             "#endif\n"
+             "        .onChange(of: columnVisibility) { newValue in",
+             "removeSettingsSidebarToggle os(macOS)-only"),
+         replace_once(
+             "                                    RoundedRectangle(cornerRadius: 12)\n"
+             "                                        .fill(.regularMaterial)\n"
+             "                                        .shadow(radius: 4)",
+             "                                    RoundedRectangle(cornerRadius: 12)\n"
+             "                                        .foregroundStyle(.regularMaterial)\n"
+             "                                        .shadow(radius: 4)",
+             "fill->foregroundStyle (Shape.fill is iOS 17+)"),
+         replace_once(
+             "                            RoundedRectangle(cornerRadius: 12)\n"
+             "                                .fill(.regularMaterial)\n"
+             "                                .shadow(radius: 4)",
+             "                            RoundedRectangle(cornerRadius: 12)\n"
+             "                                .foregroundStyle(.regularMaterial)\n"
+             "                                .shadow(radius: 4)",
+             "fill->foregroundStyle (2nd site)"),
+     ))
+edit("ExcalidrawZ/Sidebar/SidebarView.swift",
+     replace_once(
+         "                    if #available(macOS 14.0, *) {\n"
+         "                        Text(.localizable(.sidebarFilesPlaceholder))\n"
+         "                            .foregroundStyle(.placeholder)",
+         "                    if #available(macOS 14.0, iOS 17.0, *) {\n"
+         "                        Text(.localizable(.sidebarFilesPlaceholder))\n"
+         "                            .foregroundStyle(.placeholder)",
+         "placeholder clause + iOS 17.0"))
+edit("ExcalidrawZ/Share/ShareView.swift",
+     compose(
+         replace_once(
+             "        .frame(width: 400, height: 300)\n"
+             "        .visualEffect(material: .sidebar)",
+             "        .frame(width: 400, height: 300)\n"
+             "#if os(macOS)\n"
+             "        .visualEffect(material: .sidebar)\n"
+             "#endif",
+             "visualEffect(material:) os(macOS)-only (ChocofordUI NSVisualEffect)"),
+         replace_once(
+             "                    if #available(macOS 14.0, *) {\n"
+             "                        RoundedRectangle(cornerRadius: 12)\n"
+             "                            .fill(\n"
+             "                                isPressed ? AnyShapeStyle(Color.gray.opacity(0.4)) : AnyShapeStyle(isHovered ? .ultraThickMaterial : .regularMaterial)\n"
+             "                            )\n"
+             "                            .stroke(.separator, lineWidth: 0.5)\n"
+             "                            .animation(.default, value: isHovered)",
+             "                    if #available(macOS 14.0, *) {\n"
+             "                        RoundedRectangle(cornerRadius: 12)\n"
+             "                            .stroke(Color.gray.opacity(0.25), lineWidth: 0.5)\n"
+             "                            .background(\n"
+             "                                isPressed ? AnyShapeStyle(Color.gray.opacity(0.4)) : AnyShapeStyle(isHovered ? .ultraThickMaterial : .regularMaterial),\n"
+             "                                in: RoundedRectangle(cornerRadius: 12)\n"
+             "                            )\n"
+             "                            .animation(.default, value: isHovered)",
+             "share button bg: stroke+background(in:) (fill/separator iOS 17+)"),
+     ))
+edit("ExcalidrawZ/ExclidrawView/ExcalidrawToolbar.swift",
+     replace_once(
+         "                if #available(macOS 14.0, *) {\n"
+         "                    RoundedRectangle(cornerRadius: 12)\n"
+         "                        .fill(.regularMaterial)\n"
+         "                        .stroke(.separator, lineWidth: 0.5)",
+         "                if #available(macOS 14.0, *) {\n"
+         "                    RoundedRectangle(cornerRadius: 12)\n"
+         "                        .stroke(Color.gray.opacity(0.25), lineWidth: 0.5)\n"
+         "                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))",
+         "toolbar bg: stroke+background(in:) (fill/separator iOS 17+)"))
+edit("ExcalidrawZ/Utils/SegmentedPicker/SegmentedPicker.swift",
+     compose(
+         replace_once(
+             "                    RoundedRectangle(cornerRadius: 6)\n"
+             "                        .fill(.background)\n"
+             "                        .shadow(radius: 1, y: 2)",
+             "                    RoundedRectangle(cornerRadius: 6)\n"
+             "                        .foregroundStyle(.background)\n"
+             "                        .shadow(radius: 1, y: 2)",
+             "selection pill: fill->foregroundStyle"),
+         replace_once(
+             "            if #available(macOS 14.0, *) {\n"
+             "                RoundedRectangle(cornerRadius: 12)\n"
+             "                    .fill(.regularMaterial)\n"
+             "                    .stroke(.separator, lineWidth: 0.5)",
+             "            if #available(macOS 14.0, *) {\n"
+             "                RoundedRectangle(cornerRadius: 12)\n"
+             "                    .stroke(Color.gray.opacity(0.25), lineWidth: 0.5)\n"
+             "                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))",
+             "picker bg: stroke+background(in:) (fill/separator iOS 17+)"),
+     ))
+edit("ExcalidrawZ/Utils/Migration/MigrateToNewVersion.swift",
+     compose(
+         replace_once(
+             "                RoundedRectangle(cornerRadius: 8)\n"
+             "                    .fill(Color(hexString: \"#f57c00\"))",
+             "                RoundedRectangle(cornerRadius: 8)\n"
+             "                    .foregroundStyle(Color(hexString: \"#f57c00\"))",
+             "migration badge: fill->foregroundStyle"),
+         replace_once(
+             "                        if #available(macOS 14.0, *) {\n"
+             "                            RoundedRectangle(cornerRadius: 12)\n"
+             "                                .fill(.thinMaterial)\n"
+             "                                .stroke(.separator, lineWidth: 0.5)",
+             "                        if #available(macOS 14.0, *) {\n"
+             "                            RoundedRectangle(cornerRadius: 12)\n"
+             "                                .stroke(Color.gray.opacity(0.25), lineWidth: 0.5)\n"
+             "                                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))",
+             "migrate card 1: stroke+background(in:)"),
+         replace_once(
+             "                            if #available(macOS 14.0, *) {\n"
+             "                                RoundedRectangle(cornerRadius: 12)\n"
+             "                                    .fill(.thinMaterial)\n"
+             "                                    .stroke(.separator, lineWidth: 0.5)",
+             "                            if #available(macOS 14.0, *) {\n"
+             "                                RoundedRectangle(cornerRadius: 12)\n"
+             "                                    .stroke(Color.gray.opacity(0.25), lineWidth: 0.5)\n"
+             "                                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))",
+             "migrate card 2: stroke+background(in:)"),
+     ))
+edit("ExcalidrawZ/Sidebar/Library/LibraryImportSheetView.swift",
+     compose(
+         replace_once(
+             "                                                Circle().fill(.green)",
+             "                                                Circle().foregroundStyle(.green)",
+             "selection dot: fill->foregroundStyle"),
+         replace_once(
+             "                let roundedRectangle = RoundedRectangle(cornerRadius: 12)\n"
+             "                roundedRectangle.stroke(.separator, lineWidth: 0.5)\n"
+             "                roundedRectangle.fill(.regularMaterial)",
+             "                let roundedRectangle = RoundedRectangle(cornerRadius: 12)\n"
+             "                roundedRectangle.stroke(Color.gray.opacity(0.25), lineWidth: 0.5)\n"
+             "                roundedRectangle.foregroundStyle(.regularMaterial)",
+             "import sheet bg: separator->gray, fill->foregroundStyle"),
+     ))
+edit("ExcalidrawZ/Sidebar/Library/LibrarySection.swift",
+     replace_once(
+         "                                        Circle().fill(.green)",
+         "                                        Circle().foregroundStyle(.green)",
+         "selection dot: fill->foregroundStyle"))
+edit("ExcalidrawZ/Settings/AboutChocofordView.swift",
+     replace_once(
+         "                    Capsule()\n"
+         "                        .fill(.background)",
+         "                    Capsule()\n"
+         "                        .foregroundStyle(.background)",
+         "badge bg: fill->foregroundStyle"))
 PYEOF
 
 echo "== diff summary =="
