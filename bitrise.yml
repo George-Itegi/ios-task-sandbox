@@ -11,14 +11,14 @@ workflows:
     steps:
       - git-clone@8: {}
       - script@1:
-          title: "Smoke: emoncms-ios build + install + launch"
+          title: "Smoke: ExcalidrawZ build + install + launch"
           inputs:
             - content: |-
                 #!/usr/bin/env bash
                 set -euo pipefail
-                export SCHEME=EmonCMSiOS
-                export PATCH_SCRIPT=scripts/fix_emoncms_pins.sh
-                bash scripts/smoke-rehearsal.sh https://github.com/emoncms/emoncms-ios
+                export SCHEME=ExcalidrawZ
+                unset PATCH_SCRIPT 2>/dev/null || true
+                bash scripts/smoke-rehearsal.sh https://github.com/chocoford/ExcalidrawZ
                 if [ -d artifacts ] && [ -n "${BITRISE_DEPLOY_DIR:-}" ]; then
                   cp -R artifacts/. "$BITRISE_DEPLOY_DIR"/
                 fi
