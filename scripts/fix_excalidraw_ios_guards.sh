@@ -50,13 +50,10 @@ def qualify_bare_guards(src):
     return "".join(lines), f"upgraded {n} guard(s)"
 
 def open_panel(src):
-    """Wrap the NSOpenPanel implementation in #if os(macOS) and add an iOS stub."""
+    """Wrap the WHOLE original file in #if os(macOS); put an iOS stub in #else."""
     if "#if os(macOS)" in src:
         return None, "already guarded"
-    stub = """#if os(macOS)
-
-#else
-import Foundation
+    stub_body = """import Foundation
 
 /// iOS compile-only stub: NSOpenPanel does not exist on iOS. The import /
 /// export panel flows are macOS-only; on iOS they resolve to safe no-ops
@@ -68,10 +65,10 @@ class ExcalidrawOpenPanel {
     var url: URL? { nil }
     enum ModalResult { case OK, canceled }
     func runModal() -> ModalResult { .canceled }
-}
-#endif
-"""
-    return stub + src, "wrapped in #if os(macOS) with iOS stub"
+}"""
+    return ("#if os(macOS)\n" + src.rstrip("\n")
+            + "\n#else\n" + stub_body + "\n#endif\n",
+            "wrapped whole file in #if os(macOS) with iOS stub")
 
 edit("ExcalidrawZ/Settings/SettingsView.swift", qualify_bare_guards)
 edit("ExcalidrawZ/Settings/GeneralSettingsView.swift", qualify_bare_guards)
