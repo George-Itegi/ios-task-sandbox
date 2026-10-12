@@ -189,11 +189,7 @@ def dual_window_decl():
         "#else\n    @State private var window: UIWindow?\n#endif",
         "dual NSWindow/UIWindow @State decl")
 
-def append_infra(src):
-    """Utils.swift: PlatformImage typealias + Image(platformImage:) + iOS resize helper."""
-    if "typealias PlatformImage" in src:
-        return None, "infra already present"
-    infra = """
+INFRA = """
 // ==== Cross-platform shims (added by fix_excalidraw_ios_guards.sh) ====
 #if os(macOS)
 import AppKit
@@ -226,7 +222,34 @@ extension Image {
     }
 }
 """
-    return src.rstrip("\n") + "\n" + infra, "appended cross-platform shims (PlatformImage / Image init / iOS resize)"
+
+def append_infra(src):
+    """Utils.swift: import SwiftUI + PlatformImage typealias + Image(platformImage:) + iOS resize helper."""
+    notes, cur, changed = [], src, False
+    # 1) The appended extension Image { init(platformImage:) } needs SwiftUI in
+    #    scope; Utils.swift only imports Foundation + conditional AppKit/UIKit
+    #    (build #27: "cannot find type 'Image' in scope" at the extension).
+    if "\nimport SwiftUI" in cur or cur.startswith("import SwiftUI"):
+        notes.append("[keep: import SwiftUI present]")
+    elif "\nimport Foundation\n" in cur:
+        cur = cur.replace("\nimport Foundation\n",
+                          "\nimport Foundation\nimport SwiftUI\n", 1)
+        notes.append("[ok: added import SwiftUI]")
+        changed = True
+    else:
+        cur = "import SwiftUI\n" + cur
+        notes.append("[ok: added import SwiftUI (prepended)]")
+        changed = True
+    # 2) infra block (typealias + resize helper + Image init)
+    if "typealias PlatformImage" in cur:
+        notes.append("[keep: infra already present]")
+    else:
+        cur = cur.rstrip("\n") + "\n" + INFRA
+        notes.append("[ok: appended cross-platform shims (PlatformImage / Image init / iOS resize)]")
+        changed = True
+    if not changed:
+        return None, " ".join(notes)
+    return cur, " ".join(notes)
 
 HANDLECOPY_IOS = """        for item in data {
             let string = item.data
