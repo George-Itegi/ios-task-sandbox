@@ -46,6 +46,14 @@ if [ -n "${PATCH_SCRIPT:-}" ]; then
   bash "$PATCH_RESOLVED" "$PWD"
 fi
 
+# Fail fast on structural corruption introduced by patches (build-#25 class of
+# bug: leftover statements / braces split across #if-#else). Renders macOS and
+# iOS views of every .swift file and checks brace balance — costs ~1s locally.
+echo "== Validate Swift conditional structure =="
+python3 "$ROOT/scripts/validate_swift_conditional.py" "$PWD" || {
+  echo "VERDICT: fail — patch produced structurally invalid Swift (see above)"; exit 1;
+}
+
 echo "== Provision simulator =="
 # Prefer an existing available device; otherwise create one from the newest
 # iPhone devicetype + newest iOS runtime on this image.

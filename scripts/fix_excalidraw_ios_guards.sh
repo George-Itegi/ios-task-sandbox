@@ -245,7 +245,14 @@ HANDLECOPY_IOS = """        for item in data {
             }
         }"""
 
-EXPORTIMAGE_GUARD_DUAL = """#if os(macOS)
+# NOTE: old text must swallow the WHOLE guard statement (incl. else body),
+# otherwise the original 'else { ... }' survives after #endif and corrupts the file.
+EXPORTIMAGE_GUARD_OLD = """            guard let image = NSImage(contentsOf: url)?.resizeWhileMaintainingAspectRatioToSize(size: .init(width: 200, height: 120)) else {
+                hasError = true
+                return
+            }"""
+
+EXPORTIMAGE_GUARD_NEW = """#if os(macOS)
             guard let image = NSImage(contentsOf: url)?.resizeWhileMaintainingAspectRatioToSize(size: .init(width: 200, height: 120)) else {
                 hasError = true
                 return
@@ -280,17 +287,46 @@ THUMBNAIL_NEW = """    @ViewBuilder private func thumbnailView(_ image: Platform
 #endif
     }"""
 
+# NOTE: each #if branch must be brace-balanced on its own — Swift forbids
+# splitting one statement's braces across #if/#else. Duplicate the shared tail.
 COPYIMAGE_OLD = """                if let image = NSImage(contentsOf: url) {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.writeObjects([image])"""
+                    NSPasteboard.general.writeObjects([image])
+                    withAnimation {
+                        copied = true
+                    }
+                    Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                        withAnimation {
+                            copied = false
+                        }
+                    }
+                }"""
 
 COPYIMAGE_NEW = """#if os(macOS)
                 if let image = NSImage(contentsOf: url) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.writeObjects([image])
+                    withAnimation {
+                        copied = true
+                    }
+                    Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                        withAnimation {
+                            copied = false
+                        }
+                    }
+                }
 #else
                 if let image = UIImage(contentsOfFile: url.path) {
                     UIPasteboard.general.image = image
+                    withAnimation {
+                        copied = true
+                    }
+                    Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                        withAnimation {
+                            copied = false
+                        }
+                    }
+                }
 #endif"""
 
 COPYFILE_OLD = """                NSPasteboard.general.clearContents()
@@ -394,10 +430,8 @@ edit("ExcalidrawZ/Share/ExportImageView.swift",
          replace_once("    @State private var image: NSImage? = nil",
                       "    @State private var image: PlatformImage? = nil",
                       "image state via PlatformImage"),
-         replace_once(
-             "            guard let image = NSImage(contentsOf: url)?.resizeWhileMaintainingAspectRatioToSize(size: .init(width: 200, height: 120)) else {",
-             EXPORTIMAGE_GUARD_DUAL,
-             "thumbnail decode: NSImage (macOS) / UIImage (iOS)"),
+         replace_once(EXPORTIMAGE_GUARD_OLD, EXPORTIMAGE_GUARD_NEW,
+                      "thumbnail decode: NSImage (macOS) / UIImage (iOS)"),
          replace_once(THUMBNAIL_OLD, THUMBNAIL_NEW,
                       "thumbnailView: DragableImageView (macOS) / Image (iOS)"),
          replace_once(COPYIMAGE_OLD, COPYIMAGE_NEW,
