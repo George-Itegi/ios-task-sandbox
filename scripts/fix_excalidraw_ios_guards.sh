@@ -20,6 +20,26 @@
 #   7. GeneralSettingsView.swift : the DEBUG #Preview block calls
 #      .environmentObject(UpdateChecker()) but UpdateChecker is macOS-only (its own file is
 #      '#if os(macOS)') -> guard the preview with '#if DEBUG && os(macOS)'.
+# --- Wave 2 (build #24: whole-module type-check exposed unguarded AppKit types) ---
+#   8. ContentView.swift / ExcalidrawToolbar.swift / MigrateToNewVersion.swift :
+#      dual '@State window' decl (NSWindow? on macOS / UIWindow? on iOS) — same split
+#      upstream uses; ChocofordKit's bindWindow has a UIWindow overload on iOS
+#      (verified at pinned rev 39a8bf5).
+#   9. ExcalidrawStore.swift      : exportElementsToPNG/SVG return PlatformImage;
+#      NSImage(data:) -> PlatformImage(data:).
+#  10. LibraryItemView.swift      : NSCache<NSString, PlatformImage>; Image(platformImage:).
+#  11. Utils.swift                : PlatformImage typealias + Image(platformImage:) init +
+#      iOS UIImage.resizeWhileMaintainingAspectRatioToSize (mirror of the macOS-only
+#      NSImage+Extension.swift helper).
+#  12. ExportImageView.swift      : PlatformImage state/thumbnail; UIImage decode on iOS;
+#      UIPasteboard copy on iOS; DragableImageView is macOS-only in pinned ChocofordKit
+#      (whole file is #if os(macOS)) -> plain Image on iOS.
+#  13. ExportFileView.swift       : copy-to-clipboard via UIPasteboard on iOS.
+#  14. ExcalidrawStore+ScriptMessage.swift : handleCopy via UIPasteboard on iOS.
+#  15. ExcalidrawStore+UI.swift   : runOpenPanel delegate wrapped in os(macOS)
+#      (WKOpenPanelParameters is iOS 18.4+; NSOpenPanel is macOS-only).
+#  16. ExcalidrawView.swift       : keyDown(with: NSEvent) override wrapped in os(macOS).
+#  17. AboutView.swift            : app icon via Image("AppIcon") on iOS.
 #
 # Usage: bash fix_excalidraw_ios_guards.sh <target-repo-dir>
 set -euo pipefail
@@ -105,6 +125,218 @@ def compose(*fns):
         return cur, " ".join(notes)
     return fn
 
+def replace_once(old, new, note):
+    """Exact-string replace (first occurrence only)."""
+    def fn(src):
+        if new in src:
+            return None, f"already applied ({note})"
+        if old not in src:
+            return None, f"PATTERN NOT FOUND ({note}) - inspect manually"
+        return src.replace(old, new, 1), note
+    return fn
+
+def replace_all(old, new, note):
+    def fn(src):
+        if old not in src:
+            if new in src:
+                return None, f"already applied ({note})"
+            return None, f"PATTERN NOT FOUND ({note}) - inspect manually"
+        n = src.count(old)
+        return src.replace(old, new), f"replaced {n} occurrence(s) ({note})"
+    return fn
+
+def wrap_block(start_pat, note):
+    """Wrap the whole construct starting at start_pat through its closing
+    '^    }' line (4-space indent) in '#if os(macOS) ... #endif'."""
+    def fn(src):
+        if re.search(r"#if os\(macOS\)[ \t]*\n" + start_pat, src, re.M):
+            return None, f"already wrapped ({note})"
+        m = re.search(start_pat, src, re.M)
+        if not m:
+            return None, f"START NOT FOUND ({note}) - inspect manually"
+        endm = re.compile(r"^    \}$", re.M).search(src, m.end())
+        if not endm:
+            return None, f"END NOT FOUND ({note}) - inspect manually"
+        block = src[m.start():endm.end()]
+        return (src[:m.start()] + "#if os(macOS)\n" + block + "\n#endif\n"
+                + src[endm.end():]), note
+    return fn
+
+def dual_body(start_pat, ios_body, marker, note):
+    """Keep the function signature; wrap its body in
+    '#if os(macOS) <original body> #else <ios_body> #endif'."""
+    def fn(src):
+        if marker in src:
+            return None, f"already applied ({note})"
+        m = re.search(start_pat, src, re.M)
+        if not m:
+            return None, f"START NOT FOUND ({note}) - inspect manually"
+        endm = re.compile(r"^    \}$", re.M).search(src, m.end())
+        if not endm:
+            return None, f"END NOT FOUND ({note}) - inspect manually"
+        sig_end = src.index("\n", m.start()) + 1
+        sig = src[m.start():sig_end]
+        body = src[sig_end:endm.start()]
+        new = (src[:m.start()] + sig + "#if os(macOS)\n" + body + "#else\n" + ios_body
+               + "\n#endif\n" + src[endm.start():])
+        return new, note
+    return fn
+
+def dual_window_decl():
+    return replace_once(
+        "    @State private var window: NSWindow?",
+        "#if os(macOS)\n    @State private var window: NSWindow?\n"
+        "#else\n    @State private var window: UIWindow?\n#endif",
+        "dual NSWindow/UIWindow @State decl")
+
+def append_infra(src):
+    """Utils.swift: PlatformImage typealias + Image(platformImage:) + iOS resize helper."""
+    if "typealias PlatformImage" in src:
+        return None, "infra already present"
+    infra = """
+// ==== Cross-platform shims (added by fix_excalidraw_ios_guards.sh) ====
+#if os(macOS)
+import AppKit
+typealias PlatformImage = NSImage
+#else
+import UIKit
+typealias PlatformImage = UIImage
+
+/// iOS counterpart of the macOS-only helper in Extensions/NSImage+Extension.swift
+extension UIImage {
+    func resizeWhileMaintainingAspectRatioToSize(size: CGSize) -> UIImage {
+        let widthRatio = size.width / self.size.width
+        let heightRatio = size.height / self.size.height
+        let ratio = min(widthRatio, heightRatio)
+        let newSize = CGSize(width: self.size.width * ratio, height: self.size.height * ratio)
+        return UIGraphicsImageRenderer(size: newSize).image { _ in
+            self.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+    }
+}
+#endif
+
+extension Image {
+    init(platformImage: PlatformImage) {
+#if os(macOS)
+        self.init(nsImage: platformImage)
+#else
+        self.init(uiImage: platformImage)
+#endif
+    }
+}
+"""
+    return src.rstrip("\n") + "\n" + infra, "appended cross-platform shims (PlatformImage / Image init / iOS resize)"
+
+HANDLECOPY_IOS = """        for item in data {
+            let string = item.data
+            // iOS: UIPasteboard has a simpler model; text types go as strings,
+            // binary image payloads as raw data (best effort).
+            switch item.type {
+                case "image/png", "image/jpeg", "image/gif", "image/webp",
+                     "image/bmp", "image/x-icon", "image/avif", "image/jfif":
+                    if let data = Data(base64Encoded: string, options: [.ignoreUnknownCharacters]) {
+                        UIPasteboard.general.setData(data, forPasteboardType: "public.png")
+                    } else {
+                        UIPasteboard.general.string = string
+                    }
+                default:
+                    UIPasteboard.general.string = string
+            }
+        }"""
+
+EXPORTIMAGE_GUARD_DUAL = """#if os(macOS)
+            guard let image = NSImage(contentsOf: url)?.resizeWhileMaintainingAspectRatioToSize(size: .init(width: 200, height: 120)) else {
+                hasError = true
+                return
+            }
+#else
+            guard let image = UIImage(contentsOfFile: url.path)?.resizeWhileMaintainingAspectRatioToSize(size: .init(width: 200, height: 120)) else {
+                hasError = true
+                return
+            }
+#endif"""
+
+THUMBNAIL_OLD = """    @ViewBuilder private func thumbnailView(_ image: NSImage, url: URL) -> some View {
+        DragableImageView(
+            image: image,
+            sourceURL: url
+        )
+        .frame(width: 200, height: 120, alignment: .center)
+    }"""
+
+THUMBNAIL_NEW = """    @ViewBuilder private func thumbnailView(_ image: PlatformImage, url: URL) -> some View {
+#if os(macOS)
+        DragableImageView(
+            image: image,
+            sourceURL: url
+        )
+        .frame(width: 200, height: 120, alignment: .center)
+#else
+        Image(platformImage: image)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 200, height: 120, alignment: .center)
+#endif
+    }"""
+
+COPYIMAGE_OLD = """                if let image = NSImage(contentsOf: url) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects([image])"""
+
+COPYIMAGE_NEW = """#if os(macOS)
+                if let image = NSImage(contentsOf: url) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects([image])
+#else
+                if let image = UIImage(contentsOfFile: url.path) {
+                    UIPasteboard.general.image = image
+#endif"""
+
+COPYFILE_OLD = """                NSPasteboard.general.clearContents()
+                if let url = fileURL,
+                   let url = (url as NSURL).fileReferenceURL() as NSURL? {
+                    NSPasteboard.general.writeObjects([url])
+                    NSPasteboard.general.setString(url.relativeString, forType: .fileURL)
+                    NSPasteboard.general.setData(file.content, forType: .fileContents)
+                    withAnimation {
+                        copied = true
+                    }
+                    Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                        withAnimation {
+                            copied = false
+                        }
+                    }
+                }"""
+
+COPYFILE_NEW = """#if os(macOS)
+                NSPasteboard.general.clearContents()
+                if let url = fileURL,
+                   let url = (url as NSURL).fileReferenceURL() as NSURL? {
+                    NSPasteboard.general.writeObjects([url])
+                    NSPasteboard.general.setString(url.relativeString, forType: .fileURL)
+                    NSPasteboard.general.setData(file.content, forType: .fileContents)
+                    withAnimation {
+                        copied = true
+                    }
+                    Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                        withAnimation {
+                            copied = false
+                        }
+                    }
+                }
+#else
+                UIPasteboard.general.setValue(file.content, forPasteboardType: UTType.data.identifier)
+                withAnimation {
+                    copied = true
+                }
+                Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                    withAnimation {
+                        copied = false
+                    }
+                }
+#endif"""
+
 def open_panel(src):
     """Wrap the WHOLE original file in #if os(macOS); put an iOS stub in #else."""
     if "#if os(macOS)" in src:
@@ -135,6 +367,60 @@ edit("ExcalidrawZ/Persistence/File+Extension.swift",
      make_add_import("import CoreData", {"import Foundation", "import SwiftUI"}))
 edit("ExcalidrawZ/AppStore.swift",
      make_add_import("import CoreData", {"import SwiftUI", "import Combine", "import UniformTypeIdentifiers"}))
+
+# --- Wave 2: unguarded AppKit types (build #24) ---
+edit("ExcalidrawZ/Utils/Utils.swift", append_infra)
+edit("ExcalidrawZ/ContentView.swift", dual_window_decl())
+edit("ExcalidrawZ/ExclidrawView/ExcalidrawToolbar.swift", dual_window_decl())
+edit("ExcalidrawZ/Utils/Migration/MigrateToNewVersion.swift", dual_window_decl())
+edit("ExcalidrawZ/ExclidrawView/WebView/Coordinator/ExcalidrawStore.swift",
+     compose(
+         replace_all("throws -> NSImage {", "throws -> PlatformImage {",
+                     "PNG/SVG export returns PlatformImage"),
+         replace_all("let image = NSImage(data: data) else {",
+                     "let image = PlatformImage(data: data) else {",
+                     "decode via PlatformImage(data:)"),
+     ))
+edit("ExcalidrawZ/Sidebar/Library/LibraryItemView.swift",
+     compose(
+         replace_once("let excalidrawLibItemsCache: NSCache = NSCache<NSString, NSImage>()",
+                      "let excalidrawLibItemsCache: NSCache = NSCache<NSString, PlatformImage>()",
+                      "library item image cache via PlatformImage"),
+         replace_all("Image(nsImage: nsImage)", "Image(platformImage: nsImage)",
+                     "Image(platformImage:) init"),
+     ))
+edit("ExcalidrawZ/Share/ExportImageView.swift",
+     compose(
+         replace_once("    @State private var image: NSImage? = nil",
+                      "    @State private var image: PlatformImage? = nil",
+                      "image state via PlatformImage"),
+         replace_once(
+             "            guard let image = NSImage(contentsOf: url)?.resizeWhileMaintainingAspectRatioToSize(size: .init(width: 200, height: 120)) else {",
+             EXPORTIMAGE_GUARD_DUAL,
+             "thumbnail decode: NSImage (macOS) / UIImage (iOS)"),
+         replace_once(THUMBNAIL_OLD, THUMBNAIL_NEW,
+                      "thumbnailView: DragableImageView (macOS) / Image (iOS)"),
+         replace_once(COPYIMAGE_OLD, COPYIMAGE_NEW,
+                      "copy action: NSPasteboard (macOS) / UIPasteboard (iOS)"),
+     ))
+edit("ExcalidrawZ/Share/ExportFileView.swift",
+     replace_once(COPYFILE_OLD, COPYFILE_NEW,
+                  "copy file: NSPasteboard (macOS) / UIPasteboard (iOS)"))
+edit("ExcalidrawZ/ExclidrawView/WebView/Coordinator/ExcalidrawStore+ScriptMessage.swift",
+     dual_body(r"^    func handleCopy\(_ data: \[WebClipboardItem\]\) throws \{",
+               HANDLECOPY_IOS, "UIPasteboard.general.setData",
+               "handleCopy: NSPasteboard (macOS) / UIPasteboard (iOS)"))
+edit("ExcalidrawZ/ExclidrawView/WebView/Coordinator/ExcalidrawStore+UI.swift",
+     wrap_block(r"^    func webView\(\n        _ webView: WKWebView,\n        runOpenPanelWith parameters: WKOpenPanelParameters,",
+                "wrap runOpenPanel (WKOpenPanelParameters/NSOpenPanel) in os(macOS)"))
+edit("ExcalidrawZ/ExclidrawView/WebView/ExcalidrawView.swift",
+     wrap_block(r"^    override func keyDown\(with event: NSEvent\) \{",
+                "wrap keyDown(with: NSEvent) in os(macOS)"))
+edit("ExcalidrawZ/Settings/AboutView.swift",
+     replace_once(
+         "                    Image(nsImage: NSApp.applicationIconImage)",
+         "#if os(macOS)\n                    Image(nsImage: NSApp.applicationIconImage)\n#else\n                    Image(\"AppIcon\")\n#endif",
+         "About icon: NSApp.applicationIconImage (macOS) / asset (iOS)"))
 PYEOF
 
 echo "== diff summary =="
