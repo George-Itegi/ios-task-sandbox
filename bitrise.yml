@@ -75,3 +75,60 @@ workflows:
                 #!/usr/bin/env bash
                 set -euo pipefail
                 bash scripts/qualify.sh https://github.com/boostcamp-2020/Project03-A-TOTP
+  rehearse_emoncms:
+    steps:
+    - git-clone@8: {}
+    - script@1:
+        title: 'Matrix: emoncms trim task — unsolved FAIL / solved PASS'
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            set -euo pipefail
+            REF=9c25a81b688eac13089188df11877b2ceed13434
+            rm -rf legA legB
+            git clone --quiet https://github.com/emoncms/emoncms-ios legA
+            git -C legA checkout --quiet $REF
+            git clone --quiet https://github.com/emoncms/emoncms-ios legB
+            git -C legB checkout --quiet $REF
+
+            echo "== LEG A: unsolved repo — check must FAIL =="
+            if bash scripts/emoncms_check.sh legA; then
+              echo "MATRIX BROKEN: check passed on unsolved repo"; exit 1
+            else
+              echo "LEG A OK: check failed as required"
+            fi
+
+            echo "== LEG B: solved repo — check must PASS =="
+            bash scripts/emoncms_apply_solution.sh legB
+            bash scripts/emoncms_check.sh legB
+            echo "LEG B OK: check passed on solved repo"
+            echo "MATRIX RESULT: PASS (unsolved fail / solved pass)"
+    - script@1:
+        title: 'Full smoke: solved emoncms (pins fix + solution) build + install + launch'
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            set -euo pipefail
+            export SCHEME=EmonCMSiOS
+            export PATCH_SCRIPT=scripts/emoncms_smoke_patch.sh
+            bash scripts/smoke-rehearsal.sh https://github.com/emoncms/emoncms-ios 9c25a81b688eac13089188df11877b2ceed13434
+            if [ -d artifacts ] && [ -n "${BITRISE_DEPLOY_DIR:-}" ]; then
+              cp -R artifacts/. "$BITRISE_DEPLOY_DIR"/
+            fi
+    - deploy-to-bitrise-io@2: {}
+  smoke_excalidraw_2024:
+    steps:
+    - git-clone@8: {}
+    - script@1:
+        title: 'Smoke: ExcalidrawZ @ a7631da + iOS guards (build+install+launch)'
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            set -euo pipefail
+            export SCHEME=ExcalidrawZ
+            export PATCH_SCRIPT=scripts/fix_excalidraw_ios_guards.sh
+            bash scripts/smoke-rehearsal.sh https://github.com/chocoford/ExcalidrawZ a7631da
+            if [ -d artifacts ] && [ -n "${BITRISE_DEPLOY_DIR:-}" ]; then
+              cp -R artifacts/. "$BITRISE_DEPLOY_DIR"/
+            fi
+    - deploy-to-bitrise-io@2: {}
