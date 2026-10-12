@@ -1,27 +1,15 @@
-# Bitrise CI — macOS verification sandbox (Cirrus CI successor).
-#
-# Why Bitrise: Cirrus CI shut down permanently on 2026-06-01 (team joined
-# OpenAI). Bitrise offers its paid Developer Plan features FREE for PUBLIC
-# repositories (1 concurrent build, max 45 min per build, macOS stacks with
-# current Xcode) — no payment method required.
-#
-# Workflows:
-#   primary            -> FULL rehearsal of freeotp-ios: build -> boot simulator
-#                         -> install -> launch -> screenshot. Runs automatically
-#                         on the first build / any push to main.
-#   qualify_freeotp, qualify_productivity, qualify_expense
-#                      -> build-only qualification of a target repo. Start
-#                         manually: Dashboard -> Start Build -> select workflow.
-#
-# Reuses scripts/qualify.sh and scripts/smoke-rehearsal.sh — the same logic
-# that will run on GitHub Actions once the billing lock is lifted.
-
-format_version: "13"
+format_version: '25'
 default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
-
+project_type: other
+meta:
+  bitrise.io:
+    stack: osx-xcode-26.6.x
+    machine_type: standard
+    machine_type_id: g2.mac.large
 workflows:
   primary:
     steps:
+      - git-clone@8: {}
       - script@1:
           title: "Smoke: freeotp-ios build + install + launch"
           inputs:
@@ -30,9 +18,13 @@ workflows:
                 set -euo pipefail
                 export SCHEME=FreeOTP
                 bash scripts/smoke-rehearsal.sh https://github.com/freeotp/freeotp-ios
-
+                if [ -d artifacts ] && [ -n "${BITRISE_DEPLOY_DIR:-}" ]; then
+                  cp -R artifacts/. "$BITRISE_DEPLOY_DIR"/
+                fi
+      - deploy-to-bitrise-io@2: {}
   qualify_freeotp:
     steps:
+      - git-clone@8: {}
       - script@1:
           title: "Qualify: freeotp-ios (build only)"
           inputs:
@@ -40,9 +32,9 @@ workflows:
                 #!/usr/bin/env bash
                 set -euo pipefail
                 bash scripts/qualify.sh https://github.com/freeotp/freeotp-ios
-
   qualify_productivity:
     steps:
+      - git-clone@8: {}
       - script@1:
           title: "Qualify: Productivity-Pro (build only)"
           inputs:
@@ -50,11 +42,11 @@ workflows:
                 #!/usr/bin/env bash
                 set -euo pipefail
                 bash scripts/qualify.sh https://github.com/stoobit/Productivity-Pro
-
   qualify_expense:
     steps:
+      - git-clone@8: {}
       - script@1:
-          title: "Qualify: Expense-Tracker-App (build only)"
+          title: "Qualify: Expense-Tracker (build only)"
           inputs:
             - content: |-
                 #!/usr/bin/env bash
