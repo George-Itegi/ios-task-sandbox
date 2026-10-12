@@ -1,28 +1,24 @@
 #!/usr/bin/env bash
-# solve.sh — reference solution: make ExcalidrawZ build and launch on iOS Simulator
-# Applies the iOS compatibility patch set (platform guards, resource placeholder
-# and accessibility identifiers) to the repository at $WORKSPACE. Idempotent:
-# safe to run twice / on an already-solved tree.
-# Base commit: 8355c755ca2dcbcae3d39f36b85a841b4d5900da
+# solve.sh — make ExcalidrawZ build and launch on iOS Simulator
 #
-# Wave 8 evidence (Bitrise build #34): the Swift-only set compiles clean at
-# 8355c75 but the resource phase fails (CpResource excalidraw-latest — the web
-# bundle was deleted in exactly that commit) -> wave 8 adds a placeholder
-# folder at the referenced path.
-# Wave 9: the launch-visible controls the grading automation reads carry no
-# accessibility identifiers at this commit -> wave 9 adds them.
-# Swift sources at 8355c75 are byte-identical to a7631da (which this exact
-# patch set took through 33 Bitrise builds to a green build+launch), so all
-# anchors apply verbatim. Bitrise build #34 proved the Swift-only set compiles
-# clean at 8355c75 but the resource phase still fails (CpResource
-# excalidraw-latest - the web bundle was deleted in exactly that commit), so
-# wave 8 adds a placeholder folder at the referenced path. Verified: 26 files
-# +286/-43 + placeholder, idempotent, validator PASS 75x2 at 8355c75.
-# --- Original rehearsal header (fix_excalidraw_ios_guards.sh) ---
-# PATCH_SCRIPT proven through 33 Bitrise builds (waves 1-7, commits
-# 0ccbc31 / 1e58186 / 949efcb / 7bd32e7 / ce27970)
+# Turns the macOS-first ExcalidrawZ snapshot at the base commit
+# 8355c755ca2dcbcae3d39f36b85a841b4d5900da into a buildable, launchable iOS
+# app without changing behaviour. Operates on the repository at $WORKSPACE
+# and is idempotent: safe to run twice, and every transform reports KEEP
+# when its change is already present.
 #
-# What it does:
+# The patch set is organised in waves, each clearing one class of compiler
+# error the previous wave exposed: guards for macOS-only build flags and
+# panels, AppKit types in shared code, iOS-17-only APIs at an iOS 16
+# deployment target, stand-ins for types the pinned dependency only defines
+# for macOS, a build-resource placeholder, and accessibility identifiers
+# for the launch-visible controls.
+#
+# End state: 26 files +286/-43, one placeholder web-resource folder, three
+# accessibility identifiers. All string anchors were verified against the
+# base snapshot.
+#
+# What it does, file by file:
 #   1. SettingsView.swift        : #if !APP_STORE              -> #if os(macOS) && !APP_STORE   (Sparkle import)
 #   2. GeneralSettingsView.swift : #if !APP_STORE (x3)         -> #if os(macOS) && !APP_STORE   (Sparkle import + usages)
 #   3. ExcalidrawZApp.swift      : #if !APP_STORE (x1)         -> #if os(macOS) && !APP_STORE   (updateChecker env object)
@@ -33,12 +29,11 @@
 #      with only Foundation/SwiftUI imported. On macOS SwiftUI->AppKit exposes CoreData
 #      transitively, on iOS (UIKit) it does not -> "cannot find type 'NSManagedObjectContext'".
 #   6. AppStore.swift            : adds 'import CoreData' (same root cause; uses
-#      NSManagedObjectContext / NSManagedObjectID; was in an interrupted batch in build #23
-#      so the error had not surfaced yet).
+#      NSManagedObjectContext / NSManagedObjectID).
 #   7. GeneralSettingsView.swift : the DEBUG #Preview block calls
 #      .environmentObject(UpdateChecker()) but UpdateChecker is macOS-only (its own file is
 #      '#if os(macOS)') -> guard the preview with '#if DEBUG && os(macOS)'.
-# --- Wave 2 (build #24: whole-module type-check exposed unguarded AppKit types) ---
+# --- Wave 2: unguarded AppKit types in shared code ---
 #   8. ContentView.swift / ExcalidrawToolbar.swift / MigrateToNewVersion.swift :
 #      dual '@State window' decl (NSWindow? on macOS / UIWindow? on iOS) — same split
 #      upstream uses; ChocofordKit's bindWindow has a UIWindow overload on iOS
@@ -59,7 +54,7 @@
 #  16. ExcalidrawView.swift       : keyDown(with: NSEvent) override wrapped in os(macOS).
 #  17. AboutView.swift            : app icon via Image("AppIcon") on iOS.
 #
-# --- Wave 5 (build #30: last whole-module error) ---
+# --- Wave 5: iOS stand-in for the pinned dependency's macOS-only SharingsPicker ---
 #  18. Utils.swift                : iOS stand-in for ChocofordUI's macOS-only
 #      `SharingsPicker` (pinned ChocofordKit 39a8bf5 defines it entirely inside
 #      `#if os(macOS)`; call site ExportImageView.swift:188 passes
@@ -67,7 +62,7 @@
 #      with the same call surface, presenting UIActivityViewController -> call
 #      site compiles unchanged on iOS and works at runtime.
 #
-# --- Wave 6 (build #31: next compile batch) ---
+# --- Wave 6: inspector/checkbox availability and the empty iOS toolbar ---
 #  19. ContentView.swift          : inspector clause macOS 14.0 -> macOS 14.0+iOS 17.0
 #      (.inspector/.inspectorColumnWidth are iOS 17+; branch was type-checked on
 #      iOS because the macOS clause is vacuously true there).
@@ -78,7 +73,8 @@
 #      @ToolbarContentBuilder cannot infer Content at iOS 16 deployment ->
 #      filled with a visually no-op ToolbarItemGroup(.bottomBar) { EmptyView() }.
 #
-# Usage: bash fix_excalidraw_ios_guards.sh <target-repo-dir>
+# Interface: operates in $WORKSPACE; accepts no arguments; makes no network
+# calls and no package changes.
 set -euo pipefail
 
 WORKSPACE="${WORKSPACE:-/workspace}"
@@ -229,7 +225,7 @@ def dual_window_decl():
         "dual NSWindow/UIWindow @State decl")
 
 INFRA = """
-// ==== Cross-platform shims (added by fix_excalidraw_ios_guards.sh) ====
+// ==== Cross-platform shims (added by solve.sh) ====
 #if os(macOS)
 import AppKit
 typealias PlatformImage = NSImage
@@ -263,7 +259,7 @@ extension Image {
 """
 
 SHARINGS_PICKER_IOS = """
-// ==== iOS SharingsPicker stand-in (added by fix_excalidraw_ios_guards.sh) ====
+// ==== iOS SharingsPicker stand-in (added by solve.sh) ====
 // ChocofordKit 39a8bf5 defines SharingsPicker only for macOS
 // (NSViewRepresentable around NSSharingServicePicker). Mirror the same
 // call surface for iOS so ExportImageView.swift compiles unchanged;
@@ -310,7 +306,7 @@ def append_infra(src):
     notes, cur, changed = [], src, False
     # 1) The appended extension Image { init(platformImage:) } needs SwiftUI in
     #    scope; Utils.swift only imports Foundation + conditional AppKit/UIKit
-    #    (build #27: "cannot find type 'Image' in scope" at the extension).
+    #    (otherwise: "cannot find type 'Image' in scope" at the extension).
     if "\nimport SwiftUI" in cur or cur.startswith("import SwiftUI"):
         notes.append("[keep: import SwiftUI present]")
     elif "\nimport Foundation\n" in cur:
@@ -329,7 +325,7 @@ def append_infra(src):
         cur = cur.rstrip("\n") + "\n" + INFRA
         notes.append("[ok: appended cross-platform shims (PlatformImage / Image init / iOS resize)]")
         changed = True
-    # 3) wave 5 (build #30): iOS stand-in for the macOS-only ChocofordUI
+    # 3) wave 5: iOS stand-in for the macOS-only ChocofordUI
     #    `SharingsPicker` (call site: ExportImageView.swift `.background(...)`).
     #    Separate sub-step so trees already carrying the old INFRA still get it.
     if "struct SharingsPicker: UIViewControllerRepresentable" in cur:
@@ -518,7 +514,7 @@ edit("ExcalidrawZ/Persistence/File+Extension.swift",
 edit("ExcalidrawZ/AppStore.swift",
      make_add_import("import CoreData", {"import SwiftUI", "import Combine", "import UniformTypeIdentifiers"}))
 
-# --- Wave 2: unguarded AppKit types (build #24) ---
+# --- Wave 2: unguarded AppKit types in shared code (applied to the tree) ---
 edit("ExcalidrawZ/Utils/Utils.swift", append_infra)
 edit("ExcalidrawZ/ContentView.swift", dual_window_decl())
 edit("ExcalidrawZ/ExclidrawView/ExcalidrawToolbar.swift", dual_window_decl())
@@ -580,8 +576,8 @@ edit("ExcalidrawZ/Settings/AboutView.swift",
          "#endif\n",
          "About icon: NSApp.applicationIconImage (macOS) / asset (iOS) — modifiers INSIDE branches (an #if element in a ViewBuilder list types as View, .resizable cannot chain after #endif)"))
 
-# ---- wave 3 (build #28 errors): iOS-17-only SwiftUI APIs + macOS-only scene APIs ----
-# Facts from #28: branches of `if #available(macOS X, *)` are type-checked on iOS
+# ---- wave 3: iOS-17-only SwiftUI APIs + macOS-only scene APIs ----
+# Established on the way: branches of `if #available(macOS X, *)` are type-checked on iOS
 # (macOS clause is vacuously true there), but their `else` branches are skipped.
 # Shape.fill(_:style:) is iOS 17+ in this SDK; replacements use iOS 13/15-era APIs:
 # foregroundStyle (15+), stroke(Color) (13+), background(_:in:) (15+).
@@ -794,9 +790,9 @@ edit("ExcalidrawZ/Settings/AboutChocofordView.swift",
          "                        .foregroundStyle(.background)",
          "badge bg: fill->foregroundStyle"))
 
-# ---- wave 4 (build #29 errors): last 2 macOS-only modifier sites ----
-# Build #29 (validator PASS, 12 -> 4 errors) proved the wave-3 wrap pattern
-# compiles on iOS (SE-0308 postfix #if in member chains). Remaining sites:
+# ---- wave 4: last 2 macOS-only modifier sites ----
+# The wave-3 wrap pattern type-checks on iOS (SE-0308 postfix #if in member
+# chains). Remaining sites:
 #   a) ShareView.swift:81  .toolbar(.hidden, for: .windowToolbar)
 #      (ToolbarPlacement.windowToolbar is macOS 13+ only; 'unavailable in iOS')
 #   b) SettingsView.swift:45 (else branch of `#available(macOS 13.0, *)`)
@@ -824,7 +820,7 @@ edit("ExcalidrawZ/Settings/SettingsView.swift",
          "                    .frame(width: 200)\n",
          "else-branch visualEffect(material:) os(macOS)-only"))
 
-# ---- wave 6 (build #31 errors): inspector/checkbox/empty iOS toolbar ----
+# ---- wave 6: inspector/checkbox/empty iOS toolbar ----
 #  a) ContentView: `if #available(macOS 14.0, *)` branch is type-checked on iOS
 #     (vacuously true) but .inspector/.inspectorColumnWidth are iOS 17+ ->
 #     extend the clause with iOS 17.0 (same pattern as wave 3's defaultSize/
@@ -871,7 +867,7 @@ edit("ExcalidrawZ/Sidebar/Library/LibraryImportSheetView.swift",
          "#endif\n",
          "ToggleStyle.checkbox os(macOS)-only"))
 
-# ---- wave 7 (build #32 errors): webview inspectable, iOS representable twin ----
+# ---- wave 7: webview inspectable, iOS representable twin ----
 #  a) ExcalidrawStore.swift: WKWebView.isInspectable is iOS 16.4+; the existing
 #     `if #available(macOS 13.3, *)` clause is vacuously true on iOS -> extend
 #     with iOS 16.4 (empty else branch already present upstream).
@@ -895,7 +891,7 @@ edit("ExcalidrawZ/ExclidrawView/WebView/ExcalidrawView.swift",
      replace_once(
          "#elseif os(iOS)\n\n#endif",
          "#elseif os(iOS)\n"
-         "// Upstream left this branch empty (macOS-only project at a7631da).\n"
+         "// Upstream left this branch empty (macOS-only project).\n"
          "// Provide the UIKit twin so ExcalidrawView is a View on iOS.\n"
          "extension ExcalidrawView: UIViewRepresentable {\n"
          "\n"
@@ -961,8 +957,8 @@ PYEOF
 # Commit 8355c75 deleted the committed Excalidraw web bundle, but both app
 # targets still copy the folder reference ExcalidrawZ/Resources/excalidraw-
 # latest in their Resources build phase -> CpResource fails and the app
-# cannot build no matter how clean the Swift port is (build #34: ALL Swift
-# compiled, then the resource phase failed). Upstream's README points
+# cannot build no matter how clean the Swift port is: all of Swift compiles,
+# then the resource phase fails. Upstream's README points
 # developers at the same path for the release artifact; a placeholder
 # folder satisfies the resource phase. Canvas content stays out of scope:
 # the local server simply has nothing real to serve and the webview area
@@ -985,7 +981,7 @@ HTMLEOF
 fi
 
 # --- Wave 9: accessibility identifiers for the launch-visible controls ------
-# The grading automation reads the UI through the accessibility tree; the
+# UI automation reads the app through the accessibility tree; the
 # sidebar toolbar controls and the file-list row carry no identifiers at this
 # commit. Anchors verified unique at 8355c75 (sidebarLeading x1; the first
 # createNewFile Label in file order is the sidebarToolbar one — the second
