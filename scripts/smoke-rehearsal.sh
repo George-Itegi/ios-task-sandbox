@@ -33,6 +33,19 @@ if [ -n "$REF" ]; then git checkout "$REF"; fi
 git log -1 --format='Base commit: %H %ci'
 export WORKSPACE="$(pwd)"
 
+# Optional pre-build repo patch — simulates the repo edits a task agent would
+# make (e.g. dependency-pin fixes) BEFORE package resolution. PATCH_SCRIPT is
+# resolved relative to CWD first, then to the sandbox repo root ($ROOT).
+if [ -n "${PATCH_SCRIPT:-}" ]; then
+  PATCH_RESOLVED="$PATCH_SCRIPT"
+  if [ ! -f "$PATCH_RESOLVED" ] && [ -f "$ROOT/$PATCH_SCRIPT" ]; then
+    PATCH_RESOLVED="$ROOT/$PATCH_SCRIPT"
+  fi
+  [ -f "$PATCH_RESOLVED" ] || { echo "ERROR: PATCH_SCRIPT not found: $PATCH_SCRIPT"; exit 1; }
+  echo "== Apply PATCH_SCRIPT: $PATCH_RESOLVED =="
+  bash "$PATCH_RESOLVED" "$PWD"
+fi
+
 echo "== Provision simulator =="
 # Prefer an existing available device; otherwise create one from the newest
 # iPhone devicetype + newest iOS runtime on this image.

@@ -40,7 +40,17 @@ remove_build() {
 }
 siri_on_cleanup remove_build
 
-# Build the app for the simulator (mirrors the platform's required flags).
+# Pre-resolve packages ONLINE into the same derived data (mirrors the platform:
+# "dependencies download before the agent starts"; the agent/check then run
+# with no internet). Without this, the offline flag below would fail on a
+# clean machine for any repo with SPM dependencies.
+xcodebuild -resolvePackageDependencies \
+  "${PROJECT_FLAGS[@]}" -scheme "$SCHEME" \
+  -derivedDataPath "$BUILD_DIR" \
+  > "$ARTIFACTS/resolve.log" 2>&1 || fail "Package resolution failed. See resolve.log."
+
+# Build the app for the simulator (mirrors the platform's required flags —
+# note the offline flag: deps must already be resolved by the step above).
 xcodebuild -disableAutomaticPackageResolution -skipMacroValidation -skipPackagePluginValidation \
   "${PROJECT_FLAGS[@]}" -scheme "$SCHEME" -configuration Debug \
   -destination "platform=iOS Simulator,id=$UDID" \

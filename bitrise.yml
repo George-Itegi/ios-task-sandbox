@@ -17,6 +17,7 @@ workflows:
                 #!/usr/bin/env bash
                 set -euo pipefail
                 export SCHEME=EmonCMSiOS
+                export PATCH_SCRIPT=scripts/fix_emoncms_pins.sh
                 bash scripts/smoke-rehearsal.sh https://github.com/emoncms/emoncms-ios
                 if [ -d artifacts ] && [ -n "${BITRISE_DEPLOY_DIR:-}" ]; then
                   cp -R artifacts/. "$BITRISE_DEPLOY_DIR"/
