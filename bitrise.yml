@@ -52,3 +52,29 @@ workflows:
                 #!/usr/bin/env bash
                 set -euo pipefail
                 bash scripts/qualify.sh https://github.com/abdorizak/Expense-Tracker-App
+  rescue_freeotp:
+    steps:
+      - git-clone@8: {}
+      - script@1:
+          title: "Rescue: freeotp carthage bootstrap + build"
+          inputs:
+            - content: |-
+                #!/usr/bin/env bash
+                set -euo pipefail
+                echo "== Carthage availability =="
+                command -v carthage && carthage version || {
+                  echo "carthage not preinstalled - installing via brew"
+                  brew install carthage
+                }
+                git clone https://github.com/freeotp/freeotp-ios target
+                cd target
+                echo "== Fetch declared deps (Cartfile.resolved pins versions) =="
+                carthage bootstrap --platform iOS --use-xcframeworks 2>&1 || carthage bootstrap --platform iOS
+                ls -la Carthage/Build/ || true
+                echo "== Build freeotp with frameworks restored =="
+                xcodebuild build -project FreeOTP.xcodeproj -scheme FreeOTP \
+                  -destination 'generic/platform=iOS Simulator' \
+                  -skipMacroValidation -skipPackagePluginValidation \
+                  -derivedDataPath /tmp/rescue-dd \
+                  COMPILER_INDEX_STORE_ENABLE=NO CODE_SIGNING_ALLOWED=NO
+                echo "RESULT: FREEOTP RESCUE BUILD OK — viable with vendored frameworks"
