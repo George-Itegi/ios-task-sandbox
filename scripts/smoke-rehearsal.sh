@@ -57,6 +57,10 @@ if [ -z "$UDID" ]; then
   UDID="$(xcrun simctl create smoke-dev "$DEVTYPE" "$RUNTIME")"
 fi
 echo "UDID=$UDID"
+# EXPORT REQUIRED: checks/smoke-build-launch.sh runs as a child script and
+# reads $UDID for -destination and simctl. Unexported => empty id => xcodebuild
+# "missing value for key 'id' of option 'Destination'" (Build #10 failure).
+export UDID
 xcrun simctl boot "$UDID" 2>/dev/null || true
 xcrun simctl bootstatus "$UDID" -b
 

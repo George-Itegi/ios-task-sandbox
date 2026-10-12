@@ -12,6 +12,14 @@
 
 source "$(dirname "$0")/lib/platform-stubs.sh"
 
+# Environment guard: this script runs as a CHILD of smoke-rehearsal.sh and
+# depends on exported vars. Fail loudly instead of producing confusing
+# xcodebuild "missing value for key 'id'" errors from empty expansions.
+: "${UDID:?ERROR: UDID is not set/exported (parent must: export UDID)}"
+: "${WORKSPACE:?ERROR: WORKSPACE is not set/exported}"
+: "${ARTIFACTS:?ERROR: ARTIFACTS is not set/exported}"
+: "${SCHEME:?ERROR: SCHEME is not set/exported}"
+
 # ---- Defaults ----------------------------------------------------------------
 # Scheme: run `xcodebuild -list` in the repo, or read the qualifier summary.
 SCHEME="${SCHEME:-FreeOTP}"
