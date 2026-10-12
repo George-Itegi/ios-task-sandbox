@@ -54,6 +54,17 @@ workflows:
                 #!/usr/bin/env bash
                 set -euo pipefail
                 bash scripts/qualify.sh https://github.com/chocoford/ExcalidrawZ
+  qualify_excalidraw_2024:
+    steps:
+      - git-clone@8: {}
+      - script@1:
+          title: "Qualify: ExcalidrawZ @ a7631da (Sep 2024, web bundle committed)"
+          inputs:
+            - content: |-
+                #!/usr/bin/env bash
+                set -euo pipefail
+                export SCHEME=ExcalidrawZ
+                bash scripts/qualify.sh https://github.com/chocoford/ExcalidrawZ a7631da
   qualify_totp:
     steps:
       - git-clone@8: {}
