@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # fix_excalidraw_ios_guards.sh
-# PATCH_SCRIPT for smoke-rehearsal.sh — makes ExcalidrawZ @ a7631da compile
+# PATCH_SCRIPT for smoke-rehearsal.sh — makes ExcalidrawZ @ 8355c75 compile
+# (platform-accepted anchor; swift tree identical to parent a7631da, so the
+# same patch serves both — wave 7, 26 files +286/-43, validated at both refs)
 # for the iOS Simulator by adding the same platform guards upstream adopted
 # later (os(macOS) conditions). Idempotent: safe to run twice.
 #

@@ -120,14 +120,14 @@ workflows:
     steps:
     - git-clone@8: {}
     - script@1:
-        title: 'Smoke: ExcalidrawZ @ a7631da + iOS guards (build+install+launch)'
+        title: 'Smoke: ExcalidrawZ @ 8355c75 + iOS guards (build+install+launch)'
         inputs:
         - content: |-
             #!/usr/bin/env bash
             set -euo pipefail
             export SCHEME=ExcalidrawZ
             export PATCH_SCRIPT=scripts/fix_excalidraw_ios_guards.sh
-            bash scripts/smoke-rehearsal.sh https://github.com/chocoford/ExcalidrawZ a7631da
+            bash scripts/smoke-rehearsal.sh https://github.com/chocoford/ExcalidrawZ 8355c755ca2dcbcae3d39f36b85a841b4d5900da
             if [ -d artifacts ] && [ -n "${BITRISE_DEPLOY_DIR:-}" ]; then
               cp -R artifacts/. "$BITRISE_DEPLOY_DIR"/
             fi
