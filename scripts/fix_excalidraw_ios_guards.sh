@@ -62,6 +62,15 @@
 #      @ToolbarContentBuilder cannot infer Content at iOS 16 deployment ->
 #      filled with a visually no-op ToolbarItemGroup(.bottomBar) { EmptyView() }.
 #
+# --- Wave 8 (build #34: resource phase) ---
+#  23. ExcalidrawZ/Resources/excalidraw-latest : commit 8355c75 deleted the
+#      committed Excalidraw web bundle but BOTH app targets still copy the
+#      folder reference in their Resources build phase -> CpResource fails
+#      and no app target builds regardless of the Swift port (build #34:
+#      all Swift compiled, then the resource phase failed). Create a
+#      placeholder index.html at the referenced path (upstream README's own
+#      drop-location); canvas content stays out of scope.
+#
 # Usage: bash fix_excalidraw_ios_guards.sh <target-repo-dir>
 set -euo pipefail
 REPO_DIR="${1:?usage: fix_excalidraw_ios_guards.sh <repo-dir>}"
@@ -938,6 +947,25 @@ def drop_two_param_closures(src):
     return src.replace("{ _, newValue in", "{ newValue in"), f"converted {n} onChange closure(s)"
 edit("ExcalidrawZ/Sidebar/FileListView.swift", drop_two_param_closures)
 PYEOF
+
+# --- Wave 8: placeholder for the deleted web bundle -------------------------
+# CpResource folder reference must resolve for the Resources phase to pass.
+STUB_DIR="ExcalidrawZ/Resources/excalidraw-latest"
+if [ -d "$STUB_DIR" ]; then
+  echo "excalidraw-latest: already present ($(find "$STUB_DIR" -type f | wc -l | tr -d ' ') file(s)) - left untouched"
+else
+  mkdir -p "$STUB_DIR"
+  cat > "$STUB_DIR/index.html" <<'HTMLEOF'
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>ExcalidrawZ</title></head>
+<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#ffffff;color:#9aa0a6;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px">
+<p>canvas placeholder - the Excalidraw web bundle is not part of this repository snapshot</p>
+</body>
+</html>
+HTMLEOF
+  echo "PATCHED (placeholder): $STUB_DIR/index.html - CpResource folder reference now resolves"
+fi
 
 echo "== diff summary =="
 git --no-pager diff --stat || true
