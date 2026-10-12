@@ -12,11 +12,13 @@
 
 source "$(dirname "$0")/lib/platform-stubs.sh"
 
-# ---- TODO: verify these two against the target repo before running -----------
+# ---- Defaults ----------------------------------------------------------------
 # Scheme: run `xcodebuild -list` in the repo, or read the qualifier summary.
 SCHEME="${SCHEME:-FreeOTP}"
-# Bundle id: search the repo for PRODUCT_BUNDLE_IDENTIFIER.
-APP_ID="${APP_ID:-org.freeotp.FreeOTP}"
+# APP_ID: left empty on purpose — after the build we read the real bundle id
+# from the built .app's Info.plist, so a stale default can never mislead us.
+# (On the platform the same trick works; or hardcode after the survey.)
+APP_ID=""
 # ------------------------------------------------------------------------------
 
 # Auto-detect project vs workspace (the platform check may hardcode its own).
@@ -47,6 +49,13 @@ xcodebuild -disableAutomaticPackageResolution -skipMacroValidation -skipPackageP
 
 APP_PATH="$(ls -d "$BUILD_DIR"/Build/Products/Debug-iphonesimulator/*.app 2>/dev/null | head -1)"
 [ -d "$APP_PATH" ] || fail "The build produced no .app bundle."
+
+# Resolve the real bundle id from the built product (single source of truth).
+if [ -z "$APP_ID" ]; then
+  APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist" 2>/dev/null || true)"
+  [ -n "$APP_ID" ] || fail "Could not read CFBundleIdentifier from the built app."
+  echo "Detected bundle id: $APP_ID"
+fi
 
 # Uninstall old app, install candidate, launch on $UDID.
 if xcrun simctl get_app_container "$UDID" "$APP_ID" app >/dev/null 2>&1; then

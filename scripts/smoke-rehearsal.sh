@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Full smoke rehearsal on CI: build -> install -> launch a target repo on a
+# REAL iOS simulator, using the platform check contract (via stubs).
+# Usage: bash scripts/smoke-rehearsal.sh <repo-url> [ref]
+#
+# This proves the full $90-task mechanics minus UI assertions:
+#   clone -> boot simulator -> xcodebuild (parity flags) -> simctl install ->
+#   simctl launch -> screenshot.
+set -euo pipefail
+
+REPO_URL="${1:?usage: smoke-rehearsal.sh <repo-url> [ref]}"
+REF="${2:-}"
+ROOT="$PWD"
+
+echo "== Toolchain =="
+XCODE_26="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)"
+if [ -z "$XCODE_26" ]; then
+  echo "ERROR: no Xcode 26.x found. Available:"; ls /Applications | grep -i xcode || true
+  exit 1
+fi
+sudo xcode-select -s "$XCODE_26" 2>/dev/null || true
+xcodebuild -version
+swift --version 2>/dev/null | head -1 || true
+
+echo "== Clone target =="
+rm -rf target
+git clone "$REPO_URL" target
+cd target
+if [ -n "$REF" ]; then git checkout "$REF"; fi
+git log -1 --format='Base commit: %H %ci'
+export WORKSPACE="$(pwd)"
+
+echo "== Provision simulator =="
+# Prefer an existing available device; otherwise create one from the newest
+# iPhone devicetype + newest iOS runtime on this image.
+UDID="$(xcrun simctl list devices available | grep -m1 -o '[0-9A-F-]\{36\}' || true)"
+if [ -z "$UDID" ]; then
+  DEVTYPE="$(xcrun simctl list devicetypes | grep -o 'com.apple.CoreSimulator.SimDeviceType.iPhone[^(]*' | tail -1 | sed 's/[[:space:]]*$//')"
+  RUNTIME="$(xcrun simctl list runtimes | grep -o 'com.apple.CoreSimulator.SimRuntime.iOS-[0-9-]*' | tail -1)"
+  echo "Creating simulator: devicetype=$DEVTYPE runtime=$RUNTIME"
+  UDID="$(xcrun simctl create smoke-dev "$DEVTYPE" "$RUNTIME")"
+fi
+echo "UDID=$UDID"
+xcrun simctl boot "$UDID" 2>/dev/null || true
+xcrun simctl bootstatus "$UDID" -b
+
+echo "== Run smoke check (platform contract, stubs) =="
+export ARTIFACTS="$ROOT/artifacts"
+mkdir -p "$ARTIFACTS"
+export SCHEME="${SCHEME:-FreeOTP}"
+# APP_ID intentionally NOT preset: smoke-build-launch.sh derives it from the
+# built .app's Info.plist, so we never hardcode a wrong bundle id.
+bash "$ROOT/checks/smoke-build-launch.sh"
+
+echo "RESULT: SMOKE OK — build/install/launch verified on simulator"
