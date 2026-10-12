@@ -33,6 +33,16 @@ workflows:
                 set -euo pipefail
                 export SCHEME=EmonCMSiOS
                 bash scripts/qualify.sh https://github.com/emoncms/emoncms-ios
+  qualify_emoncms_diag:
+    steps:
+      - git-clone@8: {}
+      - script@1:
+          title: "Diag: emoncms-ios with Charts unlocked to 4.1.0"
+          inputs:
+            - content: |-
+                #!/usr/bin/env bash
+                set -euo pipefail
+                bash scripts/diagnose_emoncms.sh
   qualify_excalidraw:
     steps:
       - git-clone@8: {}

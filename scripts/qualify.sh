@@ -72,7 +72,12 @@ if xcodebuild build "${FLAGS[@]}" -scheme "$SCHEME" \
     > /tmp/build.log 2>&1; then
   echo "RESULT: BUILD OK — repo qualified for task authoring"
 else
-  echo "RESULT: BUILD FAILED — last 60 lines:"
-  tail -60 /tmp/build.log
+  echo "RESULT: BUILD FAILED"
+  echo "== Compiler errors (first 40, deduped) =="
+  grep 'error: ' /tmp/build.log | sed 's/^[[:space:]]*//' | awk '!seen[$0]++' | head -40 || true
+  echo "== Failed build commands =="
+  grep -A8 "The following build commands failed" /tmp/build.log | head -14 || true
+  echo "== Last 25 lines =="
+  tail -25 /tmp/build.log
   exit 1
 fi
