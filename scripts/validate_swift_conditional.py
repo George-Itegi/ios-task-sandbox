@@ -17,7 +17,11 @@ import re
 import sys
 from pathlib import Path
 
-SKIP_DIRS = {".git", ".build", "DerivedData", "Pods", "target", "artifacts", ".swiftpm"}
+SKIP_DIRS = {".git", ".build", "DerivedData", "Pods", "artifacts", ".swiftpm"}
+# NOTE: no "target" here — smoke-rehearsal.sh clones the repo INTO a dir named
+# 'target'; SKIP_DIRS applies only to components BELOW a given root (see walk),
+# so even a nested 'target' dir is fine to include, but the root must never be
+# self-skipped. Keep build-output names out of this set unless confirmed.
 
 FLAVORS = {
     "macos": {
@@ -202,9 +206,13 @@ def main():
         if r.is_file():
             files.append(r)
         else:
-            files += [p for p in sorted(r.rglob("*.swift")) if not (SKIP_DIRS & set(p.parts))]
+            files += [
+                p for p in sorted(r.rglob("*.swift"))
+                if not (SKIP_DIRS & set(p.relative_to(r).parts))
+            ]
     if not files:
-        print("ERROR: no swift files found under", *map(str, roots))
+        print("VALIDATOR WIRING ERROR: no swift files found under", *map(str, roots))
+        print("(if the root path itself contains a SKIP_DIRS name, this is the bug)")
         return 1
     failures = {}
     for p in files:
