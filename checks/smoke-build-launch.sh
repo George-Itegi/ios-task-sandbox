@@ -52,18 +52,30 @@ siri_on_cleanup remove_build
 # "dependencies download before the agent starts"; the agent/check then run
 # with no internet). Without this, the offline flag below would fail on a
 # clean machine for any repo with SPM dependencies.
-xcodebuild -resolvePackageDependencies \
+if xcodebuild -resolvePackageDependencies \
   "${PROJECT_FLAGS[@]}" -scheme "$SCHEME" \
   -derivedDataPath "$BUILD_DIR" \
-  > "$ARTIFACTS/resolve.log" 2>&1 || fail "Package resolution failed. See resolve.log."
+  > "$ARTIFACTS/resolve.log" 2>&1; then :; else
+  echo "== Resolve errors (last 25 lines of resolve.log) =="
+  tail -25 "$ARTIFACTS/resolve.log"
+  fail "Package resolution failed. See resolve.log."
+fi
 
 # Build the app for the simulator (mirrors the platform's required flags —
 # note the offline flag: deps must already be resolved by the step above).
-xcodebuild -disableAutomaticPackageResolution -skipMacroValidation -skipPackagePluginValidation \
+if xcodebuild -disableAutomaticPackageResolution -skipMacroValidation -skipPackagePluginValidation \
   "${PROJECT_FLAGS[@]}" -scheme "$SCHEME" -configuration Debug \
   -destination "platform=iOS Simulator,id=$UDID" \
   -derivedDataPath "$BUILD_DIR" CODE_SIGNING_ALLOWED=NO build \
-  > "$ARTIFACTS/build.log" 2>&1 || fail "The app does not build. See build.log."
+  > "$ARTIFACTS/build.log" 2>&1; then :; else
+  echo "== Build errors (first 40, deduped) =="
+  grep 'error: ' "$ARTIFACTS/build.log" | sed 's/^[[:space:]]*//' | awk '!seen[$0]++' | head -40 || true
+  echo "== Failed build commands =="
+  grep -A8 "The following build commands failed" "$ARTIFACTS/build.log" | head -14 || true
+  echo "== Last 25 lines of build.log =="
+  tail -25 "$ARTIFACTS/build.log"
+  fail "The app does not build. See build.log."
+fi
 
 APP_PATH="$(ls -d "$BUILD_DIR"/Build/Products/Debug-iphonesimulator/*.app 2>/dev/null | head -1)"
 [ -d "$APP_PATH" ] || fail "The build produced no .app bundle."
