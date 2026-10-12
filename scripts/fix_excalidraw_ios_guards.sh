@@ -49,6 +49,17 @@
 #      with the same call surface, presenting UIActivityViewController -> call
 #      site compiles unchanged on iOS and works at runtime.
 #
+# --- Wave 6 (build #31: next compile batch) ---
+#  19. ContentView.swift          : inspector clause macOS 14.0 -> macOS 14.0+iOS 17.0
+#      (.inspector/.inspectorColumnWidth are iOS 17+; branch was type-checked on
+#      iOS because the macOS clause is vacuously true there).
+#  20. LibraryView.swift (#Preview): same clause fix for .inspector.
+#  21. LibraryImportSheetView.swift: .toggleStyle(.checkbox) os(macOS)-wrapped.
+#  22. ContentView.swift          : toolbarContent_iOS() body was left EMPTY by
+#      upstream (never compiled upstream — macOS-only project); an empty
+#      @ToolbarContentBuilder cannot infer Content at iOS 16 deployment ->
+#      filled with a visually no-op ToolbarItemGroup(.bottomBar) { EmptyView() }.
+#
 # Usage: bash fix_excalidraw_ios_guards.sh <target-repo-dir>
 set -euo pipefail
 REPO_DIR="${1:?usage: fix_excalidraw_ios_guards.sh <repo-dir>}"
@@ -782,6 +793,53 @@ edit("ExcalidrawZ/Settings/SettingsView.swift",
          "#endif\n"
          "                    .frame(width: 200)\n",
          "else-branch visualEffect(material:) os(macOS)-only"))
+
+# ---- wave 6 (build #31 errors): inspector/checkbox/empty iOS toolbar ----
+#  a) ContentView: `if #available(macOS 14.0, *)` branch is type-checked on iOS
+#     (vacuously true) but .inspector/.inspectorColumnWidth are iOS 17+ ->
+#     extend the clause with iOS 17.0 (same pattern as wave 3's defaultSize/
+#     placeholder fixes). On iOS 16 runtime the floating-bar else branch runs.
+#  b) LibraryView DEBUG preview: same clause fix.
+#  c) LibraryImportSheetView: ToggleStyle.checkbox is macOS-only -> os(macOS)
+#     wrap (iOS default switch style applies).
+#  d) ContentView.toolbarContent_iOS(): upstream left the body EMPTY and it
+#     never compiled upstream (macOS-only project). An empty
+#     @ToolbarContentBuilder body has no zero-arg buildBlock at iOS 16
+#     deployment -> 'expected expression of type Content'. Supply a no-op item.
+edit("ExcalidrawZ/ContentView.swift",
+     compose(
+         replace_once(
+             "            if #available(macOS 14.0, *), appPreference.inspectorLayout == .sidebar {\n",
+             "            if #available(macOS 14.0, iOS 17.0, *), appPreference.inspectorLayout == .sidebar {\n",
+             "inspector clause + iOS 17.0"),
+         replace_once(
+             "    private func toolbarContent_iOS() -> some ToolbarContent {\n"
+             "        \n"
+             "    }\n",
+             "    private func toolbarContent_iOS() -> some ToolbarContent {\n"
+             "        // upstream left this body empty (never compiled upstream);\n"
+             "        // an empty @ToolbarContentBuilder body cannot infer Content\n"
+             "        // at iOS 16 deployment -> provide a visually no-op item.\n"
+             "        ToolbarItemGroup(placement: .bottomBar) { EmptyView() }\n"
+             "    }\n",
+             "empty iOS toolbar builder -> no-op item"),
+     ))
+edit("ExcalidrawZ/Sidebar/Library/LibraryView.swift",
+     replace_once(
+         "        if #available(macOS 14.0, *) {\n"
+         "            NavigationSplitView {\n",
+         "        if #available(macOS 14.0, iOS 17.0, *) {\n"
+         "            NavigationSplitView {\n",
+         "preview inspector clause + iOS 17.0"))
+edit("ExcalidrawZ/Sidebar/Library/LibraryImportSheetView.swift",
+     replace_once(
+         "                                    )\n"
+         "                                    .toggleStyle(.checkbox)\n",
+         "                                    )\n"
+         "#if os(macOS)\n"
+         "                                    .toggleStyle(.checkbox)\n"
+         "#endif\n",
+         "ToggleStyle.checkbox os(macOS)-only"))
 PYEOF
 
 echo "== diff summary =="
